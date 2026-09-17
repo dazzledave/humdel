@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>BodyForge Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div class="app">
+    <div class="viewport" id="viewport">
+      <canvas id="scene"></canvas>
+
+      <div class="topbar">
+        <div class="brand">
+          <div class="glyph">B</div>
+          <div>
+            <h1>BodyForge</h1>
+            <div class="sub">Body Studio</div>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button class="btn" id="frontBtn" title="Turn the model to face you and re-frame the view (F)">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 10h.01M15 10h.01M9 15c1.5 1.2 4.5 1.2 6 0"/></svg>
+            <span class="label-txt">Face front</span>
+          </button>
+          <button class="btn" id="rotateBtn" title="Slowly turn the model on the spot (Space)">
+            <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v4h-4"/></svg>
+            <span class="label-txt">Spin</span>
+          </button>
+          <button class="btn" id="resetBtn" title="Reset body shape, skin and clothing to defaults">
+            <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.7 3"/><path d="M3 4v4h4"/></svg>
+            <span class="label-txt">Reset all</span>
+          </button>
+          <button class="btn accent" id="createBtn" title="Build a different avatar with Ready Player Me">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>
+            <span class="label-txt">Avatar</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="measure">
+        <div class="val" id="heightReadout">—</div>
+        <div class="lbl">Model height · cm</div>
+      </div>
+
+      <div class="empty" id="empty" hidden>
+        <div class="empty-card">
+          <div class="empty-glyph">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4.2"/><path d="M4 21v-1.5a6.5 6.5 0 0 1 6.5-6.5h3a6.5 6.5 0 0 1 6.5 6.5V21"/></svg>
+          </div>
+          <h2>Load a human</h2>
+          <p>Drop a <code>.glb</code> into <code>public/models/</code>, or build a rigged avatar with the Ready Player Me creator.</p>
+          <button class="btn accent big" id="createBtn2">Open Avatar Creator</button>
+          <div class="or">or paste a model URL</div>
+          <form class="url-form" id="urlForm">
+            <input type="text" id="urlInput" placeholder="/models/human.glb" spellcheck="false" />
+            <button type="submit" class="btn">Load</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="loading" id="loading" hidden>
+        <div class="spinner"></div>
+        <div class="loading-txt" id="loadingTxt">Loading model…</div>
+      </div>
+    </div>
+
+    <aside class="panel" id="panel">
+      <div class="panel-head" id="panelHead">
+        <h2>Customize</h2>
+        <span class="pill" id="statePill">Loading…</span>
+      </div>
+
+      <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="body">Body</button>
+        <button class="tab" data-tab="clothing">Clothing</button>
+      </div>
+
+      <div class="panel-body" id="panelBody">
+        <div class="tabpane" id="paneBody"></div>
+        <div class="tabpane" id="paneClothing" hidden></div>
+      </div>
+
+      <div class="panel-foot">
+        <button class="btn wide" id="createBtn3">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>
+          Load another model
+        </button>
+      </div>
+    </aside>
+  </div>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-inner">
+      <div class="modal-bar">
+        <span>Ready Player Me — Avatar Creator</span>
+        <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
+      </div>
+      <iframe id="rpmFrame" class="rpm-frame" allow="camera *; microphone *; clipboard-write" title="Ready Player Me creator"></iframe>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

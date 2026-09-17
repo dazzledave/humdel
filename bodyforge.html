@@ -1,0 +1,911 @@
+<title>BodyForge Studio</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root{
+    --bg:#0e1116;
+    --panel:#161b22;
+    --panel-2:#1c222b;
+    --line:#262d38;
+    --line-2:#323b48;
+    --text:#e6e9ee;
+    --muted:#8b95a3;
+    --muted-2:#5f6a78;
+    --accent:#4bd0b8;
+    --accent-dim:#2f8f7e;
+    --accent-ink:#04211c;
+    --sans:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+    --disp:'Archivo','Segoe UI',system-ui,sans-serif;
+    --mono:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+    color-scheme:dark;
+  }
+
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  *{box-sizing:border-box;}
+
+  .app{
+    position:fixed;
+    inset:0;
+    display:grid;
+    grid-template-columns:1fr 348px;
+  }
+
+  /* ---------- Viewport ---------- */
+  .viewport{
+    position:relative;
+    min-width:0;
+    background:
+      radial-gradient(120% 90% at 50% 8%, #1b2430 0%, #12171e 45%, #0b0e13 100%);
+    overflow:hidden;
+  }
+  #scene{position:absolute;inset:0;display:block;touch-action:none;}
+
+  .topbar{
+    position:absolute;
+    top:0;left:0;right:0;
+    padding:14px 18px;
+    padding-top:calc(14px + env(safe-area-inset-top,0px));
+    display:flex;
+    align-items:center;
+    gap:14px;
+    z-index:5;
+    pointer-events:none;
+    background:linear-gradient(180deg, rgba(9,12,16,.72) 0%, rgba(9,12,16,0) 100%);
+  }
+  .brand{display:flex;align-items:center;gap:11px;pointer-events:auto;}
+  .brand .glyph{
+    width:34px;height:34px;border-radius:9px;flex:none;
+    background:linear-gradient(150deg,var(--accent) 0%, var(--accent-dim) 100%);
+    display:grid;place-items:center;
+    color:var(--accent-ink);font-family:var(--disp);font-weight:800;font-size:19px;
+    box-shadow:0 4px 16px rgba(75,208,184,.28);
+  }
+  .brand h1{
+    font-family:var(--disp);font-weight:700;font-size:18px;margin:0;letter-spacing:-.01em;
+    line-height:1;
+  }
+  .brand .sub{font-size:11px;color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-top:3px;}
+
+  .top-actions{margin-left:auto;display:flex;gap:8px;pointer-events:auto;flex-wrap:wrap;justify-content:flex-end;}
+  .btn{
+    font-family:var(--sans);font-size:12.5px;font-weight:600;
+    color:var(--text);
+    background:rgba(28,34,43,.86);
+    border:1px solid var(--line);
+    padding:8px 13px;border-radius:9px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;
+    backdrop-filter:blur(8px);
+    transition:border-color .15s, background .15s, transform .05s;
+  }
+  .btn:hover{border-color:var(--line-2);background:rgba(38,45,56,.92);}
+  .btn:active{transform:translateY(1px);}
+  .btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;}
+  .btn.accent{background:var(--accent);color:var(--accent-ink);border-color:transparent;}
+  .btn.accent:hover{background:#5fdcc5;}
+
+  .viewhint{
+    position:absolute;left:18px;bottom:16px;
+    bottom:calc(16px + env(safe-area-inset-bottom,0px));
+    font-family:var(--mono);font-size:11px;color:var(--muted-2);
+    letter-spacing:.02em;z-index:4;pointer-events:none;
+    display:flex;gap:14px;flex-wrap:wrap;
+  }
+  .viewhint b{color:var(--muted);font-weight:500;}
+
+  .measure{
+    position:absolute;right:18px;bottom:16px;
+    bottom:calc(16px + env(safe-area-inset-bottom,0px));
+    z-index:4;pointer-events:none;text-align:right;
+  }
+  .measure .val{font-family:var(--mono);font-weight:600;font-size:26px;color:var(--accent);line-height:1;font-variant-numeric:tabular-nums;}
+  .measure .lbl{font-size:10.5px;color:var(--muted);letter-spacing:.16em;text-transform:uppercase;margin-top:5px;}
+
+  /* ---------- Control panel ---------- */
+  .panel{
+    background:var(--panel);
+    border-left:1px solid var(--line);
+    display:flex;flex-direction:column;
+    min-height:0;
+  }
+  .panel-head{
+    padding:16px 18px 13px;
+    padding-top:calc(16px + env(safe-area-inset-top,0px));
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+    flex:none;
+  }
+  .panel-head h2{font-family:var(--disp);font-size:13px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;margin:0;color:var(--muted);}
+  .preset-wrap{position:relative;}
+  select.preset{
+    appearance:none;font-family:var(--sans);font-size:12.5px;font-weight:600;color:var(--text);
+    background:var(--panel-2);border:1px solid var(--line);border-radius:8px;
+    padding:7px 30px 7px 11px;cursor:pointer;
+  }
+  select.preset:hover{border-color:var(--line-2);}
+  .preset-wrap::after{content:"";position:absolute;right:11px;top:50%;width:7px;height:7px;border-right:1.6px solid var(--muted);border-bottom:1.6px solid var(--muted);transform:translateY(-70%) rotate(45deg);pointer-events:none;}
+
+  .panel-body{overflow-y:auto;overflow-x:hidden;padding:6px 18px 26px;flex:1;min-height:0;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;}
+  .panel-body::-webkit-scrollbar{width:9px;}
+  .panel-body::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:10px;border:2px solid var(--panel);}
+
+  .group{padding:16px 0 4px;border-bottom:1px solid var(--line);}
+  .group:last-child{border-bottom:none;}
+  .group > h3{
+    display:flex;align-items:center;gap:9px;
+    font-family:var(--disp);font-size:11.5px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 4px;
+  }
+  .group > h3 .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none;box-shadow:0 0 8px rgba(75,208,184,.5);}
+
+  .ctrl{padding:9px 0;}
+  .ctrl .row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px;}
+  .ctrl label{font-size:13px;color:var(--text);font-weight:500;}
+  .ctrl .out{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--accent);font-variant-numeric:tabular-nums;}
+
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;cursor:pointer;margin:0;
+  }
+  input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:4px;background:var(--line-2);}
+  input[type=range]::-moz-range-track{height:4px;border-radius:4px;background:var(--line-2);}
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;
+    background:var(--accent);border:3px solid var(--panel);margin-top:-6px;
+    box-shadow:0 0 0 1px var(--accent-dim),0 2px 6px rgba(0,0,0,.4);
+    transition:transform .1s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.15);}
+  input[type=range]::-moz-range-thumb{
+    width:16px;height:16px;border-radius:50%;background:var(--accent);border:3px solid var(--panel);
+    box-shadow:0 0 0 1px var(--accent-dim);
+  }
+  input[type=range]:focus-visible{outline:none;}
+  input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(75,208,184,.35);}
+
+  /* swatches */
+  .swatches{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;padding-top:8px;}
+  .swatch{display:flex;align-items:center;gap:11px;}
+  .swatch label{font-size:12.5px;color:var(--text);font-weight:500;}
+  .color-chip{position:relative;width:34px;height:34px;border-radius:9px;flex:none;overflow:hidden;border:1px solid var(--line-2);cursor:pointer;box-shadow:inset 0 0 0 2px rgba(0,0,0,.25);}
+  .color-chip input{position:absolute;inset:-6px;width:150%;height:150%;border:none;padding:0;cursor:pointer;background:transparent;}
+
+  .toggles{display:flex;gap:10px;padding-top:12px;flex-wrap:wrap;}
+  .toggle{
+    display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:500;color:var(--muted);
+    background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:8px 11px;cursor:pointer;user-select:none;
+    transition:color .15s,border-color .15s;flex:1;justify-content:center;min-width:120px;
+  }
+  .toggle .sw{width:30px;height:18px;border-radius:20px;background:var(--line-2);position:relative;transition:background .18s;flex:none;}
+  .toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#0e1116;transition:transform .18s;}
+  .toggle.on{color:var(--text);border-color:var(--accent-dim);}
+  .toggle.on .sw{background:var(--accent);}
+  .toggle.on .sw::after{transform:translateX(12px);}
+
+  /* mobile sheet control */
+  .sheet-toggle{display:none;}
+
+  @media (max-width:820px){
+    .app{grid-template-columns:1fr;}
+    .panel{
+      position:fixed;left:0;right:0;bottom:0;
+      height:64vh;max-height:64vh;
+      border-left:none;border-top:1px solid var(--line);
+      border-radius:16px 16px 0 0;
+      transform:translateY(calc(100% - 52px));
+      transition:transform .3s cubic-bezier(.4,0,.2,1);
+      z-index:20;
+      box-shadow:0 -18px 40px rgba(0,0,0,.5);
+    }
+    .panel.open{transform:translateY(0);}
+    .panel-head{padding-top:14px;border-radius:16px 16px 0 0;cursor:pointer;position:relative;}
+    .panel-head::before{content:"";position:absolute;top:7px;left:50%;transform:translateX(-50%);width:38px;height:4px;border-radius:4px;background:var(--line-2);}
+    .measure{right:14px;bottom:76px;}
+    .viewhint{display:none;}
+    .top-actions .label-txt{display:none;}
+    .btn{padding:8px 10px;}
+  }
+</style>
+
+<div class="app">
+  <div class="viewport" id="viewport">
+    <canvas id="scene"></canvas>
+
+    <div class="topbar">
+      <div class="brand">
+        <div class="glyph">B</div>
+        <div>
+          <h1>BodyForge</h1>
+          <div class="sub">Body Studio</div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="btn" id="rotateBtn" title="Toggle auto-rotate">
+          <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v4h-4"/></svg>
+          <span class="label-txt">Spin</span>
+        </button>
+        <button class="btn" id="randomBtn" title="Randomize">
+          <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="15" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="9" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="15" r="1.3" fill="currentColor" stroke="none"/></svg>
+          <span class="label-txt">Randomize</span>
+        </button>
+        <button class="btn accent" id="resetBtn" title="Reset to default">
+          <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.7 3"/><path d="M3 4v4h4"/></svg>
+          <span class="label-txt">Reset</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="viewhint">
+      <span><b>Drag</b> rotate</span>
+      <span><b>Scroll</b> zoom</span>
+      <span><b>Right-drag</b> pan</span>
+    </div>
+
+    <div class="measure">
+      <div class="val" id="heightReadout">178</div>
+      <div class="lbl">Model height · cm</div>
+    </div>
+  </div>
+
+  <aside class="panel" id="panel">
+    <div class="panel-head" id="panelHead">
+      <h2>Customize</h2>
+      <div class="preset-wrap">
+        <select class="preset" id="presetSel">
+          <option value="">Presets…</option>
+        </select>
+      </div>
+    </div>
+    <div class="panel-body" id="panelBody"><!-- controls injected --></div>
+  </aside>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+  "use strict";
+  if(!window.THREE){console.error("Three.js failed to load");return;}
+
+  /* ============================================================
+     PARAMETER MODEL
+     All body dimensions are multipliers on a base skeleton.
+  ============================================================ */
+  const RANGES = {
+    height:       {min:0.80, max:1.20, step:0.01, def:1.00, group:"Overall"},
+    headSize:     {min:0.70, max:1.45, step:0.01, def:1.00, group:"Head & Neck"},
+    neckLength:   {min:0.45, max:1.90, step:0.01, def:1.00, group:"Head & Neck"},
+    torsoLength:  {min:0.78, max:1.25, step:0.01, def:1.00, group:"Torso"},
+    torsoWidth:   {min:0.72, max:1.45, step:0.01, def:1.00, group:"Torso"},
+    shoulderWidth:{min:0.70, max:1.45, step:0.01, def:1.00, group:"Torso"},
+    hipWidth:     {min:0.62, max:1.55, step:0.01, def:1.00, group:"Torso"},
+    armLength:    {min:0.72, max:1.28, step:0.01, def:1.00, group:"Arms"},
+    armThickness: {min:0.60, max:1.70, step:0.01, def:1.00, group:"Arms"},
+    handSize:     {min:0.60, max:1.60, step:0.01, def:1.00, group:"Arms"},
+    legLength:    {min:0.72, max:1.30, step:0.01, def:1.00, group:"Legs"},
+    legThickness: {min:0.60, max:1.70, step:0.01, def:1.00, group:"Legs"},
+    footSize:     {min:0.60, max:1.60, step:0.01, def:1.00, group:"Legs"}
+  };
+  const LABELS = {
+    height:"Overall height", headSize:"Head size", neckLength:"Neck length",
+    torsoLength:"Torso length", torsoWidth:"Torso width", shoulderWidth:"Shoulder width",
+    hipWidth:"Hip width", armLength:"Arm length", armThickness:"Arm thickness",
+    handSize:"Hand size", legLength:"Leg length", legThickness:"Leg thickness", footSize:"Foot size"
+  };
+  const GROUP_ORDER = ["Overall","Head & Neck","Torso","Arms","Legs"];
+
+  const state = {
+    params:{},
+    colors:{ skin:"#e0ac83", hair:"#3a2a20", shirt:"#4bd0b8", pants:"#2b3a5c" },
+    clothing:true,
+    hair:true
+  };
+  for(const k in RANGES) state.params[k] = RANGES[k].def;
+
+  const PRESETS = {
+    "Athletic":   {p:{height:1.06,shoulderWidth:1.24,hipWidth:0.92,torsoWidth:1.05,legLength:1.08,legThickness:1.15,armThickness:1.2,headSize:0.96}, c:{skin:"#c98a5e",hair:"#241812",shirt:"#e2574c",pants:"#20242c"}},
+    "Slim":       {p:{height:1.10,shoulderWidth:0.88,hipWidth:0.78,torsoWidth:0.8,legLength:1.14,legThickness:0.72,armThickness:0.72,armLength:1.06,headSize:1.02}, c:{skin:"#f0c9a6",hair:"#5b3a24",shirt:"#7c6cf0",pants:"#33384a"}},
+    "Broad":      {p:{height:0.98,shoulderWidth:1.4,hipWidth:1.2,torsoWidth:1.35,torsoLength:0.94,legThickness:1.45,armThickness:1.5,handSize:1.25,footSize:1.2}, c:{skin:"#8d5a3c",hair:"#12100e",shirt:"#4bd0b8",pants:"#2b3a5c"}},
+    "Petite":     {p:{height:0.85,shoulderWidth:0.86,hipWidth:1.0,torsoLength:0.94,legLength:0.9,armLength:0.9,headSize:1.08,handSize:0.85,footSize:0.82}, c:{skin:"#e8b48c",hair:"#8a5a2e",shirt:"#f0a3c0",pants:"#4a5060"}},
+    "Heroic":     {p:{height:1.16,shoulderWidth:1.32,hipWidth:0.9,torsoWidth:1.12,torsoLength:1.05,legLength:1.12,legThickness:1.2,armThickness:1.3,handSize:1.1,headSize:0.9}, c:{skin:"#a6764f",hair:"#d8c26a",shirt:"#2f6df0",pants:"#1a1e26"}}
+  };
+
+  const SKIN_TONES = ["#f4d3b5","#e8b48c","#e0ac83","#c98a5e","#a6764f","#8d5a3c","#6b4228","#4a2c18"];
+  const HAIR_TONES = ["#12100e","#241812","#3a2a20","#5b3a24","#8a5a2e","#b98b4a","#d8c26a","#9a9aa2","#e2e2e6","#a63b2e","#4a4f8a"];
+  const CLOTH_TONES= ["#4bd0b8","#e2574c","#7c6cf0","#f0a3c0","#f2b33d","#3fa66a","#2f6df0","#e8e8ec","#2b3a5c","#20242c"];
+
+  /* ============================================================
+     THREE.JS SETUP
+  ============================================================ */
+  const canvas = document.getElementById('scene');
+  const viewport = document.getElementById('viewport');
+
+  const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.06;
+
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 100);
+
+  // Lighting — a soft studio setup
+  scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x20242c, 0.55));
+  const key = new THREE.DirectionalLight(0xffffff, 1.15);
+  key.position.set(3.2, 5.2, 3.6);
+  key.castShadow = true;
+  key.shadow.mapSize.set(2048,2048);
+  key.shadow.camera.near = 1; key.shadow.camera.far = 20;
+  key.shadow.camera.left=-3; key.shadow.camera.right=3; key.shadow.camera.top=4; key.shadow.camera.bottom=-1;
+  key.shadow.bias = -0.0004;
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0x8fbaff, 0.35);
+  fill.position.set(-4, 2.5, -2);
+  scene.add(fill);
+  const rim = new THREE.DirectionalLight(0x4bd0b8, 0.5);
+  rim.position.set(-2, 3.5, -4);
+  scene.add(rim);
+
+  // Ground shadow catcher + subtle grid
+  const shadowPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(40,40),
+    new THREE.ShadowMaterial({opacity:0.32})
+  );
+  shadowPlane.rotation.x = -Math.PI/2;
+  shadowPlane.position.y = 0;
+  shadowPlane.receiveShadow = true;
+  scene.add(shadowPlane);
+
+  const grid = new THREE.GridHelper(14, 28, 0x2c3542, 0x1a2029);
+  grid.position.y = 0.001;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.5;
+  scene.add(grid);
+
+  // Materials (persistent — colors update in place)
+  const skinMat  = new THREE.MeshStandardMaterial({color:state.colors.skin, roughness:0.72, metalness:0.02});
+  const hairMat  = new THREE.MeshStandardMaterial({color:state.colors.hair, roughness:0.55, metalness:0.05});
+  const shirtMat = new THREE.MeshStandardMaterial({color:state.colors.shirt, roughness:0.68, metalness:0.03});
+  const pantsMat = new THREE.MeshStandardMaterial({color:state.colors.pants, roughness:0.68, metalness:0.03});
+  const shoeMat  = new THREE.MeshStandardMaterial({color:0x1a1e24, roughness:0.5, metalness:0.08});
+  const eyeMat   = new THREE.MeshStandardMaterial({color:0x241d18, roughness:0.32, metalness:0.0});
+
+  function darken(hex, f){
+    const c = new THREE.Color(hex);
+    c.multiplyScalar(f);
+    return c;
+  }
+  function applyColors(){
+    skinMat.color.set(state.colors.skin);
+    hairMat.color.set(state.colors.hair);
+    shirtMat.color.set(state.colors.shirt);
+    pantsMat.color.set(state.colors.pants);
+    shoeMat.color.copy(darken(state.colors.pants, 0.55));
+  }
+
+  // Subtle studio environment map — gives skin & fabric a soft, realistic sheen
+  (function(){
+    try{
+      const c=document.createElement('canvas'); c.width=16; c.height=64;
+      const ctx=c.getContext('2d');
+      const g=ctx.createLinearGradient(0,0,0,64);
+      g.addColorStop(0,'#465a70'); g.addColorStop(0.5,'#222932'); g.addColorStop(1,'#0b0e13');
+      ctx.fillStyle=g; ctx.fillRect(0,0,16,64);
+      const tex=new THREE.CanvasTexture(c);
+      tex.mapping=THREE.EquirectangularReflectionMapping;
+      const pmrem=new THREE.PMREMGenerator(renderer);
+      scene.environment=pmrem.fromEquirectangular(tex).texture;
+      tex.dispose(); pmrem.dispose();
+    }catch(e){}
+  })();
+  [skinMat,hairMat,shirtMat,pantsMat,shoeMat,eyeMat].forEach(m=>{ m.envMapIntensity=0.6; });
+  skinMat.roughness=0.62; hairMat.roughness=0.5;
+
+  /* ============================================================
+     FIGURE BUILDER — base skeleton dimensions (metres)
+  ============================================================ */
+  const BASE = {
+    headR:0.108, neck:0.075, neckR:0.052,
+    torsoLen:0.60, chestR:0.185, waistR:0.145,
+    shoulderW:0.40, hipW:0.26,
+    armLen:0.66, armR:0.052,
+    legLen:0.86, legR:0.088,
+    handR:0.058, footLen:0.24, footH:0.055, footW:0.10
+  };
+
+  let figure = new THREE.Group();
+  scene.add(figure);
+  let modelHeight = 1.78;
+
+  function disposeFigure(){
+    figure.traverse(o=>{ if(o.geometry) o.geometry.dispose(); });
+    scene.remove(figure);
+  }
+
+  function ellipsoid(rx,ry,rz,mat,seg){
+    seg=seg||24;
+    const m=new THREE.Mesh(new THREE.SphereGeometry(1,seg,Math.max(8,Math.round(seg*0.75))),mat);
+    m.scale.set(rx,ry,rz); m.castShadow=true; m.receiveShadow=true; return m;
+  }
+  function jointSphere(r,mat){
+    const m=new THREE.Mesh(new THREE.SphereGeometry(r,20,16),mat);
+    m.castShadow=true; m.receiveShadow=true; return m;
+  }
+  // Two-segment tapered limb hanging from a joint (upper+fore / thigh+calf) with a mid bend.
+  function buildLimb(parent, jx, jy, o){
+    const pivot=new THREE.Group();
+    pivot.position.set(jx,jy,0);
+    pivot.rotation.z=o.tilt||0;
+    pivot.rotation.x=o.swing||0;
+    const topJ=jointSphere(o.r0, o.topMat||o.mat1);
+    topJ.scale.set(1.06,1.12,1.06);
+    pivot.add(topJ);
+    const seg1=new THREE.Mesh(new THREE.CylinderGeometry(o.r0*0.9,o.r1,Math.max(o.len1,0.02),24,1),o.mat1);
+    seg1.position.y=-o.len1/2; seg1.castShadow=seg1.receiveShadow=true; pivot.add(seg1);
+    const mid=new THREE.Group(); mid.position.y=-o.len1; mid.rotation.x=o.bend||0; pivot.add(mid);
+    mid.add(jointSphere(o.rMid,o.mat2));
+    const seg2=new THREE.Mesh(new THREE.CylinderGeometry(o.rMid,o.r2,Math.max(o.len2,0.02),24,1),o.mat2);
+    seg2.position.y=-o.len2/2; seg2.castShadow=seg2.receiveShadow=true; mid.add(seg2);
+    const end=new THREE.Group(); end.position.y=-o.len2; mid.add(end);
+    parent.add(pivot);
+    return {end, mid};
+  }
+
+  function buildFigure(){
+    disposeFigure();
+    figure = new THREE.Group();
+    const p = state.params;
+    const torsoMat  = state.clothing ? shirtMat : skinMat;
+    const lowerMat  = state.clothing ? pantsMat : skinMat;
+    const footMat   = state.clothing ? shoeMat  : skinMat;
+    const sleeveMat = state.clothing ? shirtMat : skinMat;
+
+    // --- derived dimensions
+    const legR   = BASE.legR * p.legThickness;
+    const legLen = BASE.legLen * p.legLength;
+    const footH  = BASE.footH * (0.7 + 0.3*p.footSize);
+    const hipOff = (BASE.hipW * p.hipWidth) / 2;
+    const hipY   = footH + legLen;
+
+    const chestR = BASE.chestR * p.torsoWidth;
+    const waistR = BASE.waistR * p.torsoWidth;
+    const torsoLen = BASE.torsoLen * p.torsoLength;
+    const shoulderY = hipY + torsoLen;
+    const shoulderOff = (BASE.shoulderW * p.shoulderWidth) / 2;
+    const depth = 0.74; // front-back flattening for a human cross-section
+
+    const neckLen = BASE.neck * p.neckLength;
+    const neckR   = BASE.neckR * (0.78 + 0.22*p.torsoWidth);
+    const headR   = BASE.headR * p.headSize;
+
+    const armR   = BASE.armR * p.armThickness;
+    const armLen = BASE.armLen * p.armLength;
+    const handR  = BASE.handR * p.handSize;
+
+    // --- PELVIS + glutes
+    const pelvis = ellipsoid(hipOff+waistR*0.85, waistR*1.15, waistR*1.05, lowerMat, 28);
+    pelvis.scale.z *= depth+0.18;
+    pelvis.position.y = hipY;
+    figure.add(pelvis);
+    const glute = ellipsoid(hipOff+waistR*0.6, waistR*0.7, waistR*0.7, lowerMat, 22);
+    glute.position.set(0, hipY - waistR*0.35, -waistR*0.4);
+    figure.add(glute);
+
+    // --- TORSO via organic lathe profile (waist -> chest)
+    const L = torsoLen;
+    const prof = [
+      [waistR*1.00, 0.00],
+      [waistR*0.93, L*0.15],
+      [waistR*1.03, L*0.32],
+      [chestR*0.90, L*0.54],
+      [chestR*1.00, L*0.70],
+      [chestR*0.84, L*0.88],
+      [chestR*0.48, L*1.00]
+    ].map(pt=>new THREE.Vector2(Math.max(pt[0],0.01), pt[1]));
+    const torso = new THREE.Mesh(new THREE.LatheGeometry(prof,32), torsoMat);
+    torso.position.y = hipY;
+    torso.scale.z = depth;
+    torso.castShadow = torso.receiveShadow = true;
+    figure.add(torso);
+    // pectoral fill so the chest reads solid
+    const chestCap = ellipsoid(chestR*0.92, chestR*0.42, chestR*0.92*depth, torsoMat, 26);
+    chestCap.position.y = shoulderY - chestR*0.18;
+    figure.add(chestCap);
+
+    // --- SHOULDER YOKE / trapezius
+    const yoke = ellipsoid(shoulderOff*1.0, chestR*0.42, chestR*0.6*depth+0.02, torsoMat, 26);
+    yoke.position.y = shoulderY - chestR*0.05;
+    figure.add(yoke);
+
+    // --- NECK (tapered, blends into head)
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(neckR*0.85, neckR*1.08, Math.max(neckLen,0.02), 22, 1), skinMat);
+    neck.position.y = shoulderY + neckLen/2;
+    neck.scale.z = 0.92;
+    neck.castShadow = neck.receiveShadow = true;
+    figure.add(neck);
+
+    // --- HEAD (skull + jaw + features)
+    const headCenterY = shoulderY + neckLen + headR*0.9;
+    const head = ellipsoid(headR*0.9, headR*1.05, headR*0.96, skinMat, 36);
+    head.position.y = headCenterY;
+    figure.add(head);
+    const jaw = ellipsoid(headR*0.72, headR*0.56, headR*0.82, skinMat, 28);
+    jaw.position.set(0, headCenterY - headR*0.52, headR*0.12);
+    figure.add(jaw);
+    const nose = ellipsoid(headR*0.13, headR*0.17, headR*0.2, skinMat, 14);
+    nose.position.set(0, headCenterY - headR*0.06, headR*0.92);
+    figure.add(nose);
+    [-1,1].forEach(s=>{
+      const ear = ellipsoid(headR*0.1, headR*0.22, headR*0.14, skinMat, 16);
+      ear.position.set(s*headR*0.86, headCenterY - headR*0.02, 0);
+      figure.add(ear);
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(headR*0.085,14,12), eyeMat);
+      eye.position.set(s*headR*0.32, headCenterY + headR*0.04, headR*0.8);
+      figure.add(eye);
+    });
+
+    // --- HAIR
+    if(state.hair){
+      const hairR = headR*1.05;
+      const hair = new THREE.Mesh(
+        new THREE.SphereGeometry(hairR, 36, 28, 0, Math.PI*2, 0, Math.PI*0.7), hairMat);
+      hair.scale.set(0.93, 1.06, 0.99);
+      hair.position.y = headCenterY + headR*0.04;
+      hair.rotation.x = -0.14;
+      hair.castShadow = true;
+      figure.add(hair);
+      const back = ellipsoid(headR*0.84, headR*0.66, headR*0.78, hairMat, 24);
+      back.position.set(0, headCenterY + headR*0.06, -headR*0.3);
+      figure.add(back);
+    }
+
+    // --- ARMS (upper + fore, slight elbow bend, cap sleeve)
+    [-1,1].forEach(side=>{
+      const {end} = buildLimb(figure, side*shoulderOff, shoulderY - armR*0.25, {
+        tilt: side*0.17, swing: 0.06, bend: 0.17,
+        len1: armLen*0.46, len2: armLen*0.5,
+        r0: armR*1.3, r1: armR*0.84, rMid: armR*0.8, r2: armR*0.6,
+        mat1: skinMat, mat2: skinMat, topMat: sleeveMat
+      });
+      const palm = ellipsoid(handR*0.72, handR*1.05, handR*0.44, skinMat, 20);
+      palm.position.y = -handR*0.55; end.add(palm);
+      const thumb = ellipsoid(handR*0.3, handR*0.42, handR*0.3, skinMat, 12);
+      thumb.position.set(side*handR*0.5, -handR*0.35, handR*0.12); end.add(thumb);
+    });
+
+    // --- LEGS (thigh + calf with muscle, shaped foot)
+    [-1,1].forEach(side=>{
+      const legDrop = legLen - waistR*0.4;
+      const len1 = legDrop*0.52, len2 = legDrop*0.48;
+      const kneeBend = 0.04;
+      const {end, mid} = buildLimb(figure, side*hipOff, hipY - waistR*0.4, {
+        tilt: side*0.02, swing: 0, bend: kneeBend,
+        len1: len1, len2: len2,
+        r0: legR*1.18, r1: legR*0.88, rMid: legR*0.94, r2: legR*0.58,
+        mat1: lowerMat, mat2: lowerMat, topMat: lowerMat
+      });
+      // calf muscle bulge on the back of the lower leg
+      const calf = ellipsoid(legR*0.66, len2*0.42, legR*0.9, lowerMat, 20);
+      calf.position.set(0, -len2*0.34, -legR*0.42);
+      mid.add(calf);
+      // foot
+      const footLen = BASE.footLen * p.footSize;
+      const footW   = BASE.footW  * (0.75 + 0.25*p.footSize);
+      const foot = new THREE.Group();
+      foot.rotation.x = -kneeBend; // keep sole flat
+      const sole = new THREE.Mesh(new THREE.BoxGeometry(footW*2, footH, footLen), footMat);
+      sole.castShadow = sole.receiveShadow = true; foot.add(sole);
+      const toe = ellipsoid(footW, footH*0.62, footLen*0.34, footMat, 18);
+      toe.position.z = footLen*0.5; foot.add(toe);
+      const heel = ellipsoid(footW*0.92, footH*0.72, footW*0.92, footMat, 16);
+      heel.position.z = -footLen*0.42; foot.add(heel);
+      foot.position.set(0, -footH/2, footLen*0.2);
+      end.add(foot);
+    });
+
+    // total model height
+    modelHeight = headCenterY + headR*1.05;
+
+    // global height multiplier — scaled about the feet (origin at y=0)
+    figure.scale.setScalar(p.height);
+    modelHeight *= p.height;
+
+    scene.add(figure);
+    updateReadout();
+    frameTarget();
+  }
+
+  function updateReadout(){
+    document.getElementById('heightReadout').textContent = Math.round(modelHeight*100);
+  }
+
+  /* ============================================================
+     CUSTOM ORBIT CONTROLS (no external dependency)
+  ============================================================ */
+  const orbit = {
+    target:new THREE.Vector3(0,0.95,0),
+    radius:3.4, theta:0.62, phi:1.28,
+    tRadius:3.4, tTheta:0.62, tPhi:1.28, tTarget:new THREE.Vector3(0,0.95,0),
+    minR:1.4, maxR:9, minPhi:0.25, maxPhi:Math.PI-0.12,
+    auto:false
+  };
+  function frameTarget(){
+    const y = modelHeight*0.52;
+    orbit.tTarget.set(0, y, 0);
+  }
+  function applyOrbit(){
+    orbit.radius += (orbit.tRadius-orbit.radius)*0.16;
+    orbit.theta  += (orbit.tTheta -orbit.theta )*0.18;
+    orbit.phi    += (orbit.tPhi   -orbit.phi   )*0.18;
+    orbit.target.lerp(orbit.tTarget, 0.12);
+    const s = Math.sin(orbit.phi);
+    camera.position.set(
+      orbit.target.x + orbit.radius*s*Math.sin(orbit.theta),
+      orbit.target.y + orbit.radius*Math.cos(orbit.phi),
+      orbit.target.z + orbit.radius*s*Math.cos(orbit.theta)
+    );
+    camera.lookAt(orbit.target);
+  }
+
+  // pointer interaction
+  let dragging=null, lastX=0, lastY=0, pinchDist=0;
+  canvas.addEventListener('pointerdown',e=>{
+    canvas.setPointerCapture(e.pointerId);
+    dragging = (e.button===2 || e.ctrlKey) ? 'pan' : 'rotate';
+    lastX=e.clientX; lastY=e.clientY;
+    orbit.auto=false; setSpinBtn();
+  });
+  canvas.addEventListener('pointermove',e=>{
+    if(!dragging) return;
+    const dx=e.clientX-lastX, dy=e.clientY-lastY;
+    lastX=e.clientX; lastY=e.clientY;
+    if(dragging==='rotate'){
+      orbit.tTheta -= dx*0.008;
+      orbit.tPhi = Math.max(orbit.minPhi, Math.min(orbit.maxPhi, orbit.tPhi - dy*0.008));
+    } else {
+      const panScale = orbit.radius*0.0016;
+      const right = new THREE.Vector3(Math.cos(orbit.theta),0,-Math.sin(orbit.theta));
+      orbit.tTarget.addScaledVector(right, -dx*panScale);
+      orbit.tTarget.y = Math.max(0.1, orbit.tTarget.y + dy*panScale);
+    }
+  });
+  function endDrag(e){ if(dragging){ try{canvas.releasePointerCapture(e.pointerId);}catch(_){} dragging=null; } }
+  canvas.addEventListener('pointerup',endDrag);
+  canvas.addEventListener('pointercancel',endDrag);
+  canvas.addEventListener('contextmenu',e=>e.preventDefault());
+  canvas.addEventListener('wheel',e=>{
+    e.preventDefault();
+    orbit.tRadius = Math.max(orbit.minR, Math.min(orbit.maxR, orbit.tRadius * (1 + Math.sign(e.deltaY)*0.09)));
+  },{passive:false});
+
+  // touch pinch zoom
+  const activeTouches = new Map();
+  canvas.addEventListener('pointerdown',e=>{ if(e.pointerType==='touch') activeTouches.set(e.pointerId,e); });
+  canvas.addEventListener('pointermove',e=>{
+    if(e.pointerType!=='touch') return;
+    activeTouches.set(e.pointerId,e);
+    if(activeTouches.size===2){
+      const pts=[...activeTouches.values()];
+      const d=Math.hypot(pts[0].clientX-pts[1].clientX, pts[0].clientY-pts[1].clientY);
+      if(pinchDist) orbit.tRadius=Math.max(orbit.minR,Math.min(orbit.maxR, orbit.tRadius*(pinchDist/d)));
+      pinchDist=d; dragging=null;
+    }
+  });
+  function clearTouch(e){ activeTouches.delete(e.pointerId); if(activeTouches.size<2) pinchDist=0; }
+  canvas.addEventListener('pointerup',clearTouch);
+  canvas.addEventListener('pointercancel',clearTouch);
+
+  /* ============================================================
+     RESIZE + RENDER LOOP
+  ============================================================ */
+  function resize(){
+    const w=viewport.clientWidth, h=viewport.clientHeight;
+    if(!w||!h) return;
+    renderer.setSize(w,h,false);
+    camera.aspect=w/h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize',resize);
+  if(window.ResizeObserver){ new ResizeObserver(resize).observe(viewport); }
+
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function loop(){
+    if(orbit.auto && !reduceMotion) orbit.tTheta += 0.0045;
+    applyOrbit();
+    renderer.render(scene,camera);
+    requestAnimationFrame(loop);
+  }
+
+  /* ============================================================
+     UI CONSTRUCTION
+  ============================================================ */
+  const panelBody = document.getElementById('panelBody');
+  const sliderEls = {};
+
+  function fmt(k,v){
+    return Math.round(v*100)+'%';
+  }
+
+  function buildUI(){
+    panelBody.innerHTML='';
+    GROUP_ORDER.forEach(gName=>{
+      const keys = Object.keys(RANGES).filter(k=>RANGES[k].group===gName);
+      if(!keys.length) return;
+      const g=document.createElement('div'); g.className='group';
+      const h=document.createElement('h3');
+      h.innerHTML='<span class="dot"></span>'+gName;
+      g.appendChild(h);
+      keys.forEach(k=>{
+        const r=RANGES[k];
+        const c=document.createElement('div'); c.className='ctrl';
+        const row=document.createElement('div'); row.className='row';
+        const lab=document.createElement('label'); lab.textContent=LABELS[k]; lab.setAttribute('for','sl_'+k);
+        const out=document.createElement('span'); out.className='out'; out.textContent=fmt(k,state.params[k]);
+        row.appendChild(lab); row.appendChild(out);
+        const inp=document.createElement('input');
+        inp.type='range'; inp.id='sl_'+k; inp.min=r.min; inp.max=r.max; inp.step=r.step; inp.value=state.params[k];
+        inp.addEventListener('input',()=>{
+          state.params[k]=parseFloat(inp.value);
+          out.textContent=fmt(k,state.params[k]);
+          buildFigure(); save();
+        });
+        sliderEls[k]={inp,out};
+        c.appendChild(row); c.appendChild(inp);
+        g.appendChild(c);
+      });
+      panelBody.appendChild(g);
+    });
+
+    // ---- Appearance group (colors + toggles)
+    const ag=document.createElement('div'); ag.className='group';
+    ag.innerHTML='<h3><span class="dot"></span>Appearance</h3>';
+    const sw=document.createElement('div'); sw.className='swatches';
+    const colorDefs=[["skin","Skin"],["hair","Hair"],["shirt","Top"],["pants","Bottoms"]];
+    colorDefs.forEach(([key,label])=>{
+      const item=document.createElement('div'); item.className='swatch';
+      const chip=document.createElement('div'); chip.className='color-chip';
+      chip.style.background=state.colors[key];
+      const ci=document.createElement('input'); ci.type='color'; ci.value=state.colors[key]; ci.id='col_'+key;
+      ci.addEventListener('input',()=>{
+        state.colors[key]=ci.value; chip.style.background=ci.value;
+        applyColors(); save();
+      });
+      chip.appendChild(ci);
+      const l=document.createElement('label'); l.textContent=label; l.setAttribute('for','col_'+key);
+      item.appendChild(chip); item.appendChild(l);
+      sw.appendChild(item);
+      colorChips[key]=chip; colorInputs[key]=ci;
+    });
+    ag.appendChild(sw);
+
+    const tg=document.createElement('div'); tg.className='toggles';
+    tg.appendChild(makeToggle('clothing','Clothing'));
+    tg.appendChild(makeToggle('hair','Hair'));
+    ag.appendChild(tg);
+    panelBody.appendChild(ag);
+  }
+
+  const colorChips={}, colorInputs={}, toggleEls={};
+  function makeToggle(key,label){
+    const t=document.createElement('div'); t.className='toggle'+(state[key]?' on':'');
+    t.innerHTML='<span class="sw"></span>'+label;
+    t.addEventListener('click',()=>{
+      state[key]=!state[key];
+      t.classList.toggle('on',state[key]);
+      buildFigure(); save();
+    });
+    toggleEls[key]=t;
+    return t;
+  }
+
+  function syncUI(){
+    for(const k in sliderEls){
+      sliderEls[k].inp.value=state.params[k];
+      sliderEls[k].out.textContent=fmt(k,state.params[k]);
+    }
+    for(const k in colorInputs){
+      colorInputs[k].value=state.colors[k];
+      colorChips[k].style.background=state.colors[k];
+    }
+    for(const k in toggleEls){
+      toggleEls[k].classList.toggle('on',state[k]);
+    }
+  }
+
+  // preset dropdown
+  const presetSel=document.getElementById('presetSel');
+  Object.keys(PRESETS).forEach(name=>{
+    const o=document.createElement('option'); o.value=name; o.textContent=name; presetSel.appendChild(o);
+  });
+  presetSel.addEventListener('change',()=>{
+    const pr=PRESETS[presetSel.value];
+    if(!pr) return;
+    for(const k in RANGES) state.params[k]=RANGES[k].def;
+    Object.assign(state.params, pr.p);
+    Object.assign(state.colors, pr.c);
+    applyColors(); syncUI(); buildFigure(); save();
+    presetSel.value='';
+  });
+
+  /* ============================================================
+     BUTTONS
+  ============================================================ */
+  function setSpinBtn(){
+    document.getElementById('rotateBtn').classList.toggle('accent', orbit.auto);
+  }
+  document.getElementById('rotateBtn').addEventListener('click',()=>{
+    orbit.auto=!orbit.auto; setSpinBtn();
+  });
+  document.getElementById('resetBtn').addEventListener('click',()=>{
+    for(const k in RANGES) state.params[k]=RANGES[k].def;
+    state.colors={ skin:"#e0ac83", hair:"#3a2a20", shirt:"#4bd0b8", pants:"#2b3a5c" };
+    state.clothing=true; state.hair=true;
+    orbit.tRadius=3.4; orbit.tTheta=0.62; orbit.tPhi=1.28;
+    applyColors(); syncUI(); buildFigure(); save();
+  });
+  document.getElementById('randomBtn').addEventListener('click',()=>{
+    for(const k in RANGES){
+      const r=RANGES[k];
+      // bias toward the middle for plausible bodies
+      const t=(Math.random()+Math.random())/2;
+      state.params[k]=+(r.min + t*(r.max-r.min)).toFixed(2);
+    }
+    const pick=a=>a[Math.floor(Math.random()*a.length)];
+    state.colors.skin=pick(SKIN_TONES);
+    state.colors.hair=pick(HAIR_TONES);
+    state.colors.shirt=pick(CLOTH_TONES);
+    state.colors.pants=pick(CLOTH_TONES);
+    state.hair=Math.random()>0.15;
+    applyColors(); syncUI(); buildFigure(); save();
+  });
+
+  // mobile sheet
+  const panel=document.getElementById('panel');
+  document.getElementById('panelHead').addEventListener('click',e=>{
+    if(window.matchMedia('(max-width:820px)').matches && e.target.tagName!=='SELECT' && !e.target.closest('.preset-wrap')){
+      panel.classList.toggle('open');
+    }
+  });
+
+  /* ============================================================
+     PERSISTENCE
+  ============================================================ */
+  const KEY='bodyforge.v1';
+  function save(){
+    try{ localStorage.setItem(KEY, JSON.stringify({params:state.params,colors:state.colors,clothing:state.clothing,hair:state.hair})); }catch(_){}
+  }
+  function load(){
+    try{
+      const raw=localStorage.getItem(KEY);
+      if(!raw) return;
+      const d=JSON.parse(raw);
+      if(d.params) for(const k in RANGES){ if(typeof d.params[k]==='number') state.params[k]=d.params[k]; }
+      if(d.colors) Object.assign(state.colors,d.colors);
+      if(typeof d.clothing==='boolean') state.clothing=d.clothing;
+      if(typeof d.hair==='boolean') state.hair=d.hair;
+    }catch(_){}
+  }
+
+  /* ============================================================
+     BOOT
+  ============================================================ */
+  load();
+  buildUI();
+  applyColors();
+  syncUI();
+  resize();
+  buildFigure();
+  // settle camera instantly on first frame
+  orbit.radius=orbit.tRadius; orbit.theta=orbit.tTheta; orbit.phi=orbit.tPhi;
+  orbit.target.copy(orbit.tTarget);
+  setSpinBtn();
+  loop();
+})();
+</script>
