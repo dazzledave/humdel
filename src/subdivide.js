@@ -82,10 +82,15 @@ export class PNSubdivider {
 
   // Positions and normals for every level. Only the control mesh needs a face pass;
   // finer normals come from the PN quadratic normal at each edge midpoint.
-  run(coarse){
+  run(coarse, skipNormals){
     let P = coarse, N = this.baseNormals;
+    if (!this.levels.length){
+      // unsmoothed meshes may keep last frame's normals while the shape is being dragged
+      if (!skipNormals) computeNormals(P, this.baseIndex, N);
+      this.outPos.set(coarse);
+      return;
+    }
     computeNormals(P, this.baseIndex, N);
-    if (!this.levels.length){ this.outPos.set(coarse); return; }
     for (let li = 0; li < this.levels.length; li++){
       const l = this.levels[li], out = this.pos[li], on = this.nor[li], e = l.edges, n = l.coarseCount;
       out.set(P.subarray(0, n * 3));
