@@ -1,7 +1,9 @@
 # BodyForge Studio
 
-A customizable 3D human built with **Three.js**. It loads a plain `.glb` body and gives it a
-full body-sculpting and clothing system — no rigging required — plus real 3D shoes.
+A customizable 3D human built with **Three.js**, with a **male and a female body**. It loads a
+plain `.glb` body and gives it a full body-sculpting and clothing system — no rigging required —
+plus real 3D shoes. Switch bodies at the top of the Body tab; each keeps its own shape, and
+clothing carries over.
 
 ## Run it
 
@@ -36,10 +38,21 @@ lights up in the legend.
 | `src/subdivide.js` | Curved (PN-triangle) subdivision that smooths the body mesh |
 | `src/shoes.js` | Loads and orients the shoe model; styles, patterns, materials |
 | `src/legend.js` | Controls legend and keyboard navigation |
-| `public/models/human.glb` | The body |
+| `public/models/human.glb` | The male body (low-poly, smoothed at load) |
+| `public/models/humanfemale.glb` | The female body (high-detail sculpt, with eyes) |
 | `public/models/shoe.glb` | The shoe (one right shoe, mirrored for the left foot) |
 
 ## How it works
+
+### Loading a body
+Models can arrive split into several pieces (the female sculpt is 4 pieces plus the eyes). The
+pieces are merged into one mesh and the seams welded so the skin shades without seams. Separate
+materials stay as groups — the eyes get a material that draws the sclera, iris and pupil (no
+textures needed), with an eye-colour picker. Low-poly bodies get curved subdivision; detailed
+sculpts are used as-is. Each body is normalized to its own height (1.80 m / 1.68 m), and the
+front is found from the feet, so any standing model faces the camera.
+
+Switching back to a body you have already loaded is quick: processed bodies are kept in memory.
 
 ### Procedural rig (no skeleton needed)
 `human.glb` is an unrigged static mesh, so the app builds an implicit rig from the mesh
@@ -112,11 +125,13 @@ for those, since they come dressed.
 
 ## Credits
 
-Both bundled models are licensed **CC-BY-4.0**; the credits are shown in the app's Body tab —
+All bundled models are licensed **CC-BY-4.0**; the credits are shown in the app's Body tab —
 keep them if you ship this.
 
-- Body: “Human” by **aaron.kalvin** —
+- Male body: “Human” by **aaron.kalvin** —
   [Sketchfab](https://sketchfab.com/3d-models/human-03a70758739544b3aa705c13af3872b1)
+- Female body: “Study Human Female Sculpt” by **Uladzislau** —
+  [Sketchfab](https://sketchfab.com/3d-models/study-human-female-sculpt-854fbf358991477aab518e07556da906)
 - Shoe: “Shoe” by **abdullahyeahyea** —
   [Sketchfab](https://sketchfab.com/3d-models/shoe-d1ce9883180e41649ceb0253525f8a18)
 
