@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { PNSubdivider } from './subdivide.js';
+import { PNSubdivider, computeNormals } from './subdivide.js';
 import { buildShoeTemplate, createShoeMaterials, createShoeInstance, applyShoeLook,
          SHOE_STYLES, PATTERNS, FINISHES } from './shoes.js';
 import { setupControlsLegend } from './legend.js';
@@ -11,17 +11,25 @@ import { setupControlsLegend } from './legend.js';
 /* ============================================================
    CONFIG
 ============================================================ */
-const DEFAULT_MODEL = '/models/human.glb';
 const SHOE_MODEL = '/models/shoe.glb';
-const TARGET_HEIGHT = 1.8;
 const RPM_SUBDOMAIN = 'demo';
-const SUBDIV_LEVELS = 2;            // smoothing passes on the body mesh (each ×4 triangles)
-const CREDITS = [
-  { what:'Body', title:'Human', author:'aaron.kalvin',
-    url:'https://sketchfab.com/3d-models/human-03a70758739544b3aa705c13af3872b1', license:'CC-BY-4.0' },
-  { what:'Shoe', title:'Shoe', author:'abdullahyeahyea',
-    url:'https://sketchfab.com/3d-models/shoe-d1ce9883180e41649ceb0253525f8a18', license:'CC-BY-4.0' }
-];
+
+// The bundled bodies. Each is normalized to its own standing height (metres).
+const BODIES = {
+  male:   { label:'Male',   url:'/models/human.glb',       height:1.80,
+            credit:{ title:'Human', author:'aaron.kalvin',
+              url:'https://sketchfab.com/3d-models/human-03a70758739544b3aa705c13af3872b1' } },
+  female: { label:'Female', url:'/models/humanfemale.glb', height:1.68,
+            credit:{ title:'Study Human Female Sculpt', author:'Uladzislau',
+              url:'https://sketchfab.com/3d-models/study-human-female-sculpt-854fbf358991477aab518e07556da906' } }
+};
+const SHOE_CREDIT = { title:'Shoe', author:'abdullahyeahyea',
+  url:'https://sketchfab.com/3d-models/shoe-d1ce9883180e41649ceb0253525f8a18' };
+const EYE_COLORS = [['#5a3a22','Brown'],['#8a6230','Hazel'],['#4f7a4a','Green'],['#4a78b0','Blue'],
+                    ['#7d8a94','Grey'],['#2a1c14','Dark brown']];
+
+// Smoothing passes for the body mesh (each ×4 triangles): low-poly models get more.
+const subdivLevelsFor = tris => tris<=30000 ? 2 : tris<=120000 ? 1 : 0;
 
 /* ---------- Parameter definitions ---------- */
 const PARAMS = {
@@ -63,7 +71,28 @@ const BODY_GROUPS = ['Overall','Head & Neck','Torso','Arms','Legs'];
 const BONE_PARAMS = ['height','headSize','neckLength','torsoLength','shoulderWidth','chestWidth',
                      'armLength','armThickness','legLength','legThickness'];
 
-const PRESETS = {
+const PRESETS_FEMALE = {
+  'Athletic':  {build:1.02, shoulderWidth:1.06, shoulderSlope:1.02, chestWidth:1.04, chestDepth:1.02,
+                waistWidth:0.92, belly:0.88, hipWidth:1.0, glutes:1.08, bodyDepth:1.02,
+                armThickness:1.05, upperArm:1.04, legThickness:1.06, thighs:1.04, calves:1.06, legLength:1.03},
+  'Slim':      {build:0.92, shoulderWidth:0.96, chestWidth:0.94, chestDepth:0.92, waistWidth:0.88,
+                belly:0.86, hipWidth:0.94, glutes:0.92, bodyDepth:0.93, armThickness:0.88,
+                legThickness:0.88, neckThickness:0.94, legLength:1.04, height:1.02},
+  'Curvy':     {build:1.02, chestWidth:1.04, chestDepth:1.2, waistWidth:0.9, belly:0.95,
+                hipWidth:1.14, glutes:1.22, thighs:1.03},
+  'Plus-size': {build:1.13, chestWidth:1.12, chestDepth:1.2, waistWidth:1.22, belly:1.34, hipWidth:1.18,
+                glutes:1.16, bodyDepth:1.14, armThickness:1.18, upperArm:1.06, legThickness:1.16,
+                thighs:1.08, neckThickness:1.12, height:0.99},
+  'Tall':      {height:1.1, legLength:1.08, torsoLength:1.03, armLength:1.04, build:0.97},
+  'Petite':    {height:0.9, legLength:0.95, torsoLength:0.97, build:0.95, headSize:1.03,
+                shoulderWidth:0.95, hipWidth:1.02, handSize:0.92, footSize:0.92}
+};
+
+// Labels that read better for one body type.
+const LABEL_OVERRIDES = { female:{ chestDepth:'Bust' } };
+const paramLabel = k => (LABEL_OVERRIDES[currentBody]||{})[k] || PARAMS[k].label;
+
+const PRESETS_MALE = {
   'Athletic':  {build:1.04, shoulderWidth:1.12, shoulderSlope:1.04, chestWidth:1.10, chestDepth:1.10,
                 waistWidth:0.93, belly:0.9, hipWidth:0.98, glutes:1.06, bodyDepth:1.04,
                 armThickness:1.10, upperArm:1.06, legThickness:1.06, thighs:1.04, calves:1.06,
@@ -94,12 +123,19 @@ const CLOTHING = {
            patternScale:1.0, platform:1.0, fit:1.0 }
 };
 
+const presetsFor = () => currentBody==='female' ? PRESETS_FEMALE : PRESETS_MALE;
+
 const state = {
-  params:{}, skinColor:'#c8a184', modelUrl:'',
+  params:{}, skinColor:'#c8a184', modelUrl:'', body:'male',
+  bodyParams:{},          // each body type keeps its own shape
+  eyeColor:'#5a3a22',
   clothing: JSON.parse(JSON.stringify(CLOTHING)),
   fabric: 0.78   // roughness: 0.3 satin .. 1.0 matte
 };
-for(const k in PARAMS) state.params[k] = PARAMS[k].def;
+const defaultParams = () => { const p={}; for(const k in PARAMS) p[k]=PARAMS[k].def; return p; };
+state.params = defaultParams();
+let currentBody = null;     // key into BODIES for the loaded model, or null for a custom one
+let targetHeight = 1.8;
 
 /* ============================================================
    SCENE
@@ -203,52 +239,103 @@ function buildSegmentation(){
   const clampS=s=>Math.min(SL-1,Math.max(0,s));
 
   /* ---- topology: weld by position, then union-find on a vertex subset ---- */
-  const eps=H*2e-5, keyMap=new Map(), canon=new Int32Array(n); let nc=0;
-  for(let i=0;i<n;i++){
-    const k=Math.round(b[i*3]/eps)+','+Math.round(b[i*3+1]/eps)+','+Math.round(b[i*3+2]/eps);
-    let c=keyMap.get(k); if(c===undefined){ c=nc++; keyMap.set(k,c); }
-    canon[i]=c;
-  }
+  const all=new Uint32Array(n); for(let i=0;i<n;i++) all[i]=i;
+  const { ids:canon, count:nc }=positionIds(b, all, H*2e-5);
   const idx=bodyIndex, tri=idx.length/3, par=new Int32Array(nc);
   const find=a=>{ while(par[a]!==a){ par[a]=par[par[a]]; a=par[a]; } return a; };
   const unite=(p,q)=>{ p=find(p); q=find(q); if(p!==q) par[p]=q; };
-  function components(keep){
+  // per-triangle data, prepared once: welded corners and highest point
+  const tc=new Int32Array(tri*3), triMax=new Float32Array(tri);
+  for(let f=0;f<tri;f++){
+    const A=idx[f*3], B=idx[f*3+1], C=idx[f*3+2];
+    tc[f*3]=canon[A]; tc[f*3+1]=canon[B]; tc[f*3+2]=canon[C];
+    triMax[f]=Math.max(t[A],t[B],t[C]);
+  }
+  let triArm=null, vertArm=null;
+  // Connected pieces of the mesh below height T (optionally leaving the arms out).
+  function components(T, noArm){
     for(let c=0;c<nc;c++) par[c]=c;
     for(let f=0;f<tri;f++){
-      const A=idx[f*3], B=idx[f*3+1], C=idx[f*3+2];
-      if(!keep(A)||!keep(B)||!keep(C)) continue;
-      unite(canon[A],canon[B]); unite(canon[B],canon[C]);
+      if(triMax[f]>=T || (noArm && triArm[f])) continue;
+      unite(tc[f*3],tc[f*3+1]); unite(tc[f*3+1],tc[f*3+2]);
     }
     const st=new Map();
     for(let i=0;i<n;i++){
-      if(!keep(i)) continue;
+      if(t[i]>=T || (noArm && vertArm[i])) continue;
       const r=find(canon[i]);
       let s=st.get(r); if(!s){ s={r,cnt:0,sx:0,sa:0}; st.set(r,s); }
       s.cnt++; s.sx+=b[i*3+wi]-wCen; s.sa+=ax[i];
     }
     return [...st.values()].sort((p,q)=>q.cnt-p.cnt);
   }
+  // Triangles bucketed by the height slice of their highest corner.
+  const tStart=new Int32Array(SL+1), triSlice=new Int32Array(tri);
+  for(let f=0;f<tri;f++){ const s=clampS(Math.floor(triMax[f]*SL)); triSlice[f]=s; tStart[s+1]++; }
+  for(let s=0;s<SL;s++) tStart[s+1]+=tStart[s];
+  const tOrder=new Int32Array(tri);
+  { const fill=tStart.slice(0,SL); for(let f=0;f<tri;f++) tOrder[fill[triSlice[f]]++]=f; }
+  const cCnt=new Float64Array(nc), cSx=new Float64Array(nc), cSa=new Float64Array(nc);
+
+  // One upward sweep: add each slice's vertices and triangles, merging pieces as they join,
+  // and ask test(cut, largePieces, keptCount) after every slice. Returns the highest cut
+  // (in slices) where the test held, or -1.
+  function sweep(noArm, test){
+    for(let c=0;c<nc;c++){ par[c]=c; cCnt[c]=0; cSx[c]=0; cSa[c]=0; }
+    const large=new Set(), LARGE=Math.max(8, n*0.002);
+    const join=(p,q)=>{
+      p=find(p); q=find(q); if(p===q) return;
+      par[p]=q; cCnt[q]+=cCnt[p]; cSx[q]+=cSx[p]; cSa[q]+=cSa[p];
+      large.delete(p); if(cCnt[q]>=LARGE) large.add(q);
+    };
+    let kept=0, best=-1;
+    for(let s=0;s<SL;s++){
+      for(const i of buckets[s]){
+        if(noArm && vertArm[i]) continue;
+        const r=find(canon[i]);
+        cCnt[r]++; cSx[r]+=b[i*3+wi]-wCen; cSa[r]+=ax[i]; kept++;
+        if(cCnt[r]>=LARGE) large.add(r);
+      }
+      for(let q=tStart[s];q<tStart[s+1];q++){
+        const f=tOrder[q];
+        if(noArm && triArm[f]) continue;
+        join(tc[f*3],tc[f*3+1]); join(tc[f*3+1],tc[f*3+2]);
+      }
+      const roots=[...large].map(r=>({r,cnt:cCnt[r],sx:cSx[r],sa:cSa[r]})).sort((p,q)=>q.cnt-p.cnt);
+      if(test(s+1,roots,kept)) best=s+1;
+    }
+    return best;
+  }
 
   /* ---- ARMS: highest cut where two lateral components break away ---- */
   const armComp=new Uint8Array(n);        // 0 none, 1 left, 2 right
-  let hasArms=false, cutT=0.72;
-  for(let s=Math.floor(0.88*SL); s>=Math.floor(0.45*SL); s--){
-    const T=s/SL;
-    const cs=components(i=>t[i]<T);
-    const best=[null,null];
+  const armPair=(s)=>{
+    const cs=components(s/SL,false), best=[null,null];
     for(const c of cs){
       if(c.cnt<n*0.004 || c.sa/c.cnt<0.35*wHalf) continue;
       const sd=c.sx<0?0:1;
       if(!best[sd]||c.cnt>best[sd].cnt) best[sd]=c;
     }
-    if(best[0]&&best[1]&&best[0]!==best[1]){
-      hasArms=true; cutT=T;
-      for(let i=0;i<n;i++){
-        if(t[i]>=T) continue;
-        const r=find(canon[i]);
-        if(r===best[0].r) armComp[i]=1; else if(r===best[1].r) armComp[i]=2;
-      }
-      break;
+    return best[0]&&best[1]&&best[0]!==best[1] ? best : null;
+  };
+  let hasArms=false, cutT=0.72;
+  const aTop=Math.floor(0.88*SL), aBot=Math.floor(0.45*SL);
+  const armS=sweep(false,(s,roots)=>{
+    if(s<aBot||s>aTop) return false;
+    const best=[null,null];
+    for(const c of roots){
+      if(c.cnt<n*0.004 || c.sa/c.cnt<0.35*wHalf) continue;
+      const sd=c.sx<0?0:1;
+      if(!best[sd]||c.cnt>best[sd].cnt) best[sd]=c;
+    }
+    return !!(best[0]&&best[1]&&best[0].r!==best[1].r);
+  });
+  if(armS>=0){
+    const best=armPair(armS);             // re-run so the union-find holds this cut
+    hasArms=true; cutT=armS/SL;
+    for(let i=0;i<n;i++){
+      if(t[i]>=cutT) continue;
+      const r=find(canon[i]);
+      if(r===best[0].r) armComp[i]=1; else if(r===best[1].r) armComp[i]=2;
     }
   }
   const cutS=clampS(Math.round(cutT*SL));
@@ -314,21 +401,30 @@ function buildSegmentation(){
 
   /* ---- LEGS: highest cut where the lower body splits into two legs ---- */
   const legComp=new Uint8Array(n);
+  vertArm=new Uint8Array(n);
+  for(let i=0;i<n;i++) vertArm[i]=armW[i]>=0.5?1:0;
+  triArm=new Uint8Array(tri);
+  for(let f=0;f<tri;f++) triArm[f]=(vertArm[idx[f*3]]|vertArm[idx[f*3+1]]|vertArm[idx[f*3+2]]);
+  const legPair=(s)=>{
+    const cs=components(s/SL,true);
+    if(cs.length<2) return null;
+    const kept=cs.reduce((a,c)=>a+c.cnt,0), A=cs[0], B=cs[1];
+    return B.cnt>0.12*kept && Math.sign(A.sx)!==Math.sign(B.sx) ? [A,B] : null;
+  };
   let crotchT=0.46, hasLegs=false;
-  for(let s=Math.floor(0.62*SL); s>=Math.floor(0.2*SL); s--){
-    const T=s/SL;
-    const cs=components(i=>t[i]<T && armW[i]<0.5);
-    if(cs.length<2) continue;
-    const kept=cs.reduce((a,c)=>a+c.cnt,0);
-    const A=cs[0], B=cs[1];
-    if(B.cnt>0.12*kept && Math.sign(A.sx)!==Math.sign(B.sx)){
-      crotchT=T; hasLegs=true;
-      for(let i=0;i<n;i++){
-        if(t[i]>=T||armW[i]>=0.5) continue;
-        const r=find(canon[i]);
-        if(r===A.r) legComp[i]=A.sx<0?1:2; else if(r===B.r) legComp[i]=B.sx<0?1:2;
-      }
-      break;
+  const lTop=Math.floor(0.62*SL), lBot=Math.floor(0.2*SL);
+  const legS=sweep(true,(s,roots,kept)=>{
+    if(s<lBot||s>lTop||roots.length<2) return false;
+    const A=roots[0], B=roots[1];
+    return B.cnt>0.12*kept && Math.sign(A.sx)!==Math.sign(B.sx);
+  });
+  if(legS>=0){
+    const [A,B]=legPair(legS);
+    crotchT=legS/SL; hasLegs=true;
+    for(let i=0;i<n;i++){
+      if(t[i]>=crotchT||vertArm[i]) continue;
+      const r=find(canon[i]);
+      if(r===A.r) legComp[i]=A.sx<0?1:2; else if(r===B.r) legComp[i]=B.sx<0?1:2;
     }
   }
   const crotchS=clampS(Math.round(crotchT*SL));
@@ -437,10 +533,20 @@ function buildSegmentation(){
     } else { laW[i]=pW; laD[i]=pD; }
   }
 
-  /* ---- which way the body faces (the face side carries more detail) ---- */
-  let fwd=0, bwd=0;
-  for(let i=0;i<n;i++){ if(t[i]<hT) continue; if(b[i*3+di]>dCen) fwd++; else bwd++; }
-  const frontSign=fwd>=bwd?1:-1;
+  /* ---- which way the body faces: the feet reach forward from the ankles ---- */
+  let footD=0, footC=0, ankD=0, ankC=0;
+  for(let i=0;i<n;i++){
+    if(armW[i]>=0.5) continue;
+    if(t[i]<footTopT*0.5){ footD+=b[i*3+di]; footC++; }
+    else if(t[i]>footTopT && t[i]<footTopT+0.03){ ankD+=b[i*3+di]; ankC++; }
+  }
+  let frontSign;
+  if(footC && ankC && Math.abs(footD/footC-ankD/ankC)>1e-6) frontSign=(footD/footC>ankD/ankC)?1:-1;
+  else {                                        // fallback: the face side carries more detail
+    let fwd=0, bwd=0;
+    for(let i=0;i<n;i++){ if(t[i]<hT) continue; if(b[i*3+di]>dCen) fwd++; else bwd++; }
+    frontSign=fwd>=bwd?1:-1;
+  }
 
   /* ---- per-height depth centre of the trunk (so depth changes don't shift the body) ---- */
   const dLo=new Float64Array(SL).fill(Infinity), dHi=new Float64Array(SL).fill(-Infinity);
@@ -535,7 +641,7 @@ function buildSegmentation(){
    DEFORMATION
 ============================================================ */
 const scratch={};
-function applyMeshMorphs(){
+function applyMeshMorphs(quick){
   const P=state.params, S=seg;
   const b=basePositions, arr=coarsePos;
   const {ui,wi,di,upMin,wCen,dCen,H}=axes;
@@ -586,11 +692,14 @@ function applyMeshMorphs(){
   const {newHalf,pushRaw,pushSm,armDispS}=scratch;
   newHalf.fill(0);
 
+  // hot loop: read the per-vertex arrays and slider values through locals
+  const p_build=P.build, p_belly=P.belly, p_chestDepth=P.chestDepth, p_glutes=P.glutes, p_bodyDepth=P.bodyDepth, p_thighs=P.thighs, p_calves=P.calves, p_footSize=P.footSize, p_height=P.height;
+  const A_side=S.side, A_armW=S.armW, A_handW=S.handW, A_latW=S.latW, A_shBand=S.shBand, A_legW=S.legW, A_front=S.front, A_back=S.back, A_segK=S.segK, A_segA=S.segA, A_wBuild=S.wBuild, A_wTorsoD=S.wTorsoD, A_wBelly=S.wBelly, A_wPec=S.wPec, A_wGlute=S.wGlute, A_ax=S.ax, A_Rt=S.Rt, A_dMid=S.dMid, A_laW=S.laW, A_laD=S.laD, A_spreadT=S.spreadT, A_wCalf=S.wCalf, A_footW=S.footW, A_sliceOf=S.sliceOf;
   for(let i=0;i<n;i++){
     const o=i*3;
     const u=b[o+ui], x=b[o+wi], y=b[o+di];
-    const sgn=S.side[i]?1:-1;
-    const aw=S.armW[i], hw=S.handW[i];
+    const sgn=A_side[i]?1:-1;
+    const aw=A_armW[i], hw=A_handW[i];
 
     /* ---- vertical ---- */
     let U=mapUp(u);
@@ -601,48 +710,53 @@ function applyMeshMorphs(){
       U+=(uA-U)*aw;
     }
     // shoulder line: the shoulder tops and the whole arm move together
-    U+=slopeLift*(S.latW[i]*S.shBand[i]*(1-aw)+aw);
-    U=upMin+(U-upMin)*P.height;
+    U+=slopeLift*(A_latW[i]*A_shBand[i]*(1-aw)+aw);
+    U=upMin+(U-upMin)*p_height;
+
+    const lw=A_legW[i], fr=A_front[i], bk=A_back[i];
+    let xT=0, yT=0, xL=0, yL=0;
 
     /* ---- torso: smooth girth profile, rigid beyond the torso radius ---- */
-    const k=S.segK[i], a=S.segA[i];
-    const bw=1+(P.build-1)*S.wBuild[i];
-    const fr=S.front[i], bk=S.back[i];
-    let gw=(gW[k]+(gW[k+1]-gW[k])*a)*bw;
-    let gd=(gD[k]+(gD[k+1]-gD[k])*a)*bw*(1+(P.bodyDepth-1)*S.wTorsoD[i]);
-    gw*=1+(P.belly-1)*0.3*S.wBelly[i];
-    gd*=1+(P.belly-1)*S.wBelly[i]*fr
-         +(P.chestDepth-1)*S.wPec[i]*fr
-         +(P.glutes-1)*S.wGlute[i]*bk;
-    const r=S.ax[i], R=S.Rt[i];
-    let xT = r<=R ? wCen+(x-wCen)*gw : wCen+sgn*(R*gw+(r-R));
-    xT+=sgn*shift*S.latW[i]*S.shBand[i];
-    const dm=S.dMid[i];
-    const yT=dm+(y-dm)*gd;
+    if(lw<1){
+      const k=A_segK[i], a=A_segA[i];
+      const bw=1+(p_build-1)*A_wBuild[i];
+      let gw=(gW[k]+(gW[k+1]-gW[k])*a)*bw;
+      let gd=(gD[k]+(gD[k+1]-gD[k])*a)*bw*(1+(p_bodyDepth-1)*A_wTorsoD[i]);
+      gw*=1+(p_belly-1)*0.3*A_wBelly[i];
+      gd*=1+(p_belly-1)*A_wBelly[i]*fr
+           +(p_chestDepth-1)*A_wPec[i]*fr
+           +(p_glutes-1)*A_wGlute[i]*bk;
+      const r=A_ax[i], R=A_Rt[i];
+      xT = r<=R ? wCen+(x-wCen)*gw : wCen+sgn*(R*gw+(r-R));
+      xT+=sgn*shift*A_latW[i]*A_shBand[i];
+      const dm=A_dMid[i];
+      yT=dm+(y-dm)*gd;
+    }
 
     /* ---- legs: about each leg's own axis, thighs / calves separately ---- */
-    const la=S.laW[i], lad=S.laD[i];
-    const spread=1+hipSpread*S.spreadT[i];
-    const wc=S.wCalf[i];
-    const legGirth=ltBase*(P.thighs+(P.calves-P.thighs)*wc);
-    const inner=(x-la)*(la-wCen)<0;
-    const legT=inner?1+(legGirth-1)*0.55:legGirth;             // thighs grow less inward
-    const fw=S.footW[i];
-    const thick=legT+(P.footSize-legT)*fw;
-    const xL=wCen+(la-wCen)*spread+(x-la)*thick;
-    // calves and glutes push out mostly at the back
-    const depthExtra=1+(P.calves-1)*0.6*wc*bk*(1-fw)+(P.glutes-1)*S.wGlute[i]*bk;
-    const yL=lad+(y-lad)*thick*depthExtra;
-    const lw=S.legW[i];
-    const X=xT+(xL-xT)*lw, Y=yT+(yL-yT)*lw;
+    if(lw>0){
+      const la=A_laW[i], lad=A_laD[i];
+      const spread=1+hipSpread*A_spreadT[i];
+      const wc=A_wCalf[i];
+      const legGirth=ltBase*(p_thighs+(p_calves-p_thighs)*wc);
+      const inner=(x-la)*(la-wCen)<0;
+      const legT=inner?1+(legGirth-1)*0.55:legGirth;             // thighs grow less inward
+      const fw=A_footW[i];
+      const thick=legT+(p_footSize-legT)*fw;
+      xL=wCen+(la-wCen)*spread+(x-la)*thick;
+      // calves and glutes push out mostly at the back
+      const depthExtra=1+(p_calves-1)*0.6*wc*bk*(1-fw)+(p_glutes-1)*A_wGlute[i]*bk;
+      yL=lad+(y-lad)*thick*depthExtra;
+    }
+    const X= lw<=0 ? xT : lw>=1 ? xL : xT+(xL-xT)*lw;
+    const Y= lw<=0 ? yT : lw>=1 ? yL : yT+(yL-yT)*lw;
 
     arr[o+ui]=U; arr[o+wi]=X; arr[o+di]=Y;
     if(aw<0.5){
-      const s=S.sliceOf[i], hx=Math.abs(X-wCen);
+      const s=A_sliceOf[i], hx=Math.abs(X-wCen);
       if(hx>newHalf[s]) newHalf[s]=hx;
     }
   }
-
   /* ---- pass 2: arms, pushed out wherever the body grew into their space ---- */
   if(LM.hasArms){
     const SL=LM.SL;
@@ -694,18 +808,19 @@ function applyMeshMorphs(){
       arr[o+di]=dCen+(arr[o+di]-dCen)*hs;
     }
   }
-
   /* ---- shoes: fit to the feet, then tuck the feet inside ---- */
   fitShoes(arr);
   if(shoesVisible()) tuckFeet(arr);
-
+  updateEyes(arr);
   /* ---- smooth the control mesh onto the display mesh ---- */
-  sub.run(arr);
+  // on dense bodies, lighting normals wait until the shape settles (see settleBody)
+  const skipNormals=!!quick && heavyBody;
+  sub.run(arr, skipNormals);
+  if(skipNormals) normalsStale=true;
   bodyGeo.attributes.position.needsUpdate=true;
   bodyGeo.attributes.normal.needsUpdate=true;
   updateBodyBounds();
   if(bodyMat) bodyMat.color.set(state.skinColor);
-
   updateGarments();
   plantAndMeasure();
 }
@@ -727,7 +842,7 @@ let morphQueued=false;
 function scheduleMorph(){
   if(morphQueued) return;
   morphQueued=true;
-  const run=()=>{ if(!morphQueued) return; morphQueued=false; applyMorphs(); };
+  const run=()=>{ if(!morphQueued) return; morphQueued=false; applyMorphs(true); };
   requestAnimationFrame(run);
   setTimeout(run,50);
 }
@@ -963,25 +1078,47 @@ function rebuildGarment(kind){
   if(on){
     const idx=surf.index, T=idx.length/3;
     const slot=new Int32Array(surf.t.length).fill(-1);
+    // Cut points on a triangle edge are shared by both triangles (and both pieces) meeting
+    // there, so hems and piece seams are continuous.
+    const edgeCuts=new Map();
     const idOf=(tri,w)=>{
       for(let c=0;c<3;c++) if(w===CORNER[c]){
         const v=tri[c];
         if(slot[v]<0){ slot[v]=direct.length; direct.push(v); }
         return slot[v];
       }
+      let zi=-1; for(let c=0;c<3;c++) if(w[c]===0) zi=c;
+      if(zi>=0){
+        const i0=(zi+1)%3, i1=(zi+2)%3;
+        let va=tri[i0], vb=tri[i1], wa=w[i0];
+        if(va>vb){ const q=va; va=vb; vb=q; wa=1-wa; }
+        const k=va+','+vb+','+Math.round(wa*1e6);
+        const hit=edgeCuts.get(k); if(hit!==undefined) return hit;
+        cut.push(va,vb,vb,wa,1-wa,0);
+        const id=-(cut.length/6); edgeCuts.set(k,id); return id;
+      }
       cut.push(tri[0],tri[1],tri[2],w[0],w[1],w[2]);
       return -(cut.length/6);
     };
     for(const conds of garmentPieces(kind)){
+      // height range the piece can occupy, from its height conditions (the neckline field
+      // is height plus a non-negative scoop, so it bounds height from above too)
+      let tLo=-Infinity, tHi=Infinity;
+      for(const q of conds){
+        if(q.F===surf.t){ if(q.sign>0) tLo=Math.max(tLo,q.k); else tHi=Math.min(tHi,q.k); }
+        else if(q.F===surf._neckF && q.sign<0) tHi=Math.min(tHi,q.k);
+      }
+      const cv=new Float64Array(conds.length*3);
       for(let f=0;f<T;f++){
+        if(surf.triHi[f]<tLo || surf.triLo[f]>tHi) continue;
         const a=idx[f*3], b=idx[f*3+1], c=idx[f*3+2];
         let allIn=true, reject=false;
-        const cv=[];
-        for(const q of conds){
+        for(let qi=0;qi<conds.length;qi++){
+          const q=conds[qi];
           const va=q.sign*(q.F[a]-q.k), vb=q.sign*(q.F[b]-q.k), vc=q.sign*(q.F[c]-q.k);
           if(va<0&&vb<0&&vc<0){ reject=true; break; }
           if(va<0||vb<0||vc<0) allIn=false;
-          cv.push(va,vb,vc);
+          cv[qi*3]=va; cv[qi*3+1]=vb; cv[qi*3+2]=vc;
         }
         if(reject) continue;
         let poly=CORNER;
@@ -1021,40 +1158,141 @@ function rebuildGarment(kind){
   }
   g.mesh.geometry=geo; g.geo=geo;
   g.mesh.visible=on && out.length>0;
+  buildGarmentSmoothing(g, index, nv);
+}
+
+// Neighbour lists for fabric smoothing. Hem vertices only listen to their hem neighbours,
+// so hems get straightened along their own line instead of being pulled inward.
+function buildGarmentSmoothing(g, index, nv){
+  const edgeUse=new Map();
+  const key=(a,b)=>a<b ? a*nv+b : b*nv+a;
+  for(let f=0;f<index.length;f+=3){
+    for(const [a,b] of [[index[f],index[f+1]],[index[f+1],index[f+2]],[index[f+2],index[f]]]){
+      const k=key(a,b); edgeUse.set(k,(edgeUse.get(k)||0)+1);
+    }
+  }
+  const onHem=new Uint8Array(nv);
+  for(const [k,c] of edgeUse) if(c===1){ onHem[Math.floor(k/nv)]=1; onHem[k%nv]=1; }
+  const deg=new Int32Array(nv+1);
+  const edges=[];
+  for(const [k,c] of edgeUse){
+    const a=Math.floor(k/nv), b=k%nv;
+    const hemEdge=c===1;
+    if(!onHem[a]||hemEdge){ edges.push(a,b); deg[a+1]++; }
+    if(!onHem[b]||hemEdge){ edges.push(b,a); deg[b+1]++; }
+  }
+  for(let v=0;v<nv;v++) deg[v+1]+=deg[v];
+  const adj=new Int32Array(deg[nv]), fill=deg.slice(0,nv);
+  for(let e=0;e<edges.length;e+=2) adj[fill[edges[e]]++]=edges[e+1];
+  g.adjStart=deg; g.adj=adj; g.tmp=new Float32Array(nv*3); g.disp=null;
+  g.gIndex=index;
+}
+
+// Volume-preserving (Taubin) smoothing: alternate a shrinking and an inflating step.
+function smoothGarment(g, iterations){
+  const p=g.geo.attributes.position.array, tmp=g.tmp, S=g.adjStart, A=g.adj, nv=g.count;
+  for(let it=0;it<iterations*2;it++){
+    const f=(it&1) ? -0.53 : 0.5;
+    tmp.set(p.subarray(0,nv*3));
+    for(let v=0;v<nv;v++){
+      const s0=S[v], s1=S[v+1], k=s1-s0; if(!k) continue;
+      let x=0,y=0,z=0;
+      for(let q=s0;q<s1;q++){ const o=A[q]*3; x+=tmp[o]; y+=tmp[o+1]; z+=tmp[o+2]; }
+      const o=v*3;
+      p[o]  +=f*(x/k-tmp[o]);
+      p[o+1]+=f*(y/k-tmp[o+1]);
+      p[o+2]+=f*(z/k-tmp[o+2]);
+    }
+  }
+}
+
+// Garment shell = body surface + normal × offset + the fabric's drape offset (`disp`),
+// kept outside the skin. The drape comes from smoothing the shell; that is too heavy to run
+// every frame on detailed bodies, so it is recomputed once the body stops changing.
+function writeGarment(g, kind, P, N, withDrape, shade){
+  const off=axes.H*0.0032*g.offsetMul*(state.clothing[kind].fit??1);
+  const minOff=off*0.55;
+  const gp=g.geo.attributes.position.array, gn=g.geo.attributes.normal.array;
+  const D=g.direct, nd=D.length, disp=g.disp;
+  const drape=withDrape && disp;
+  for(let v=0;v<nd;v++){
+    const s=D[v]*3, o=v*3;
+    const nx=N[s], ny=N[s+1], nz=N[s+2];
+    let x=P[s]+nx*off, y=P[s+1]+ny*off, z=P[s+2]+nz*off;
+    if(drape){
+      x+=disp[o]; y+=disp[o+1]; z+=disp[o+2];
+      const d=(x-P[s])*nx+(y-P[s+1])*ny+(z-P[s+2])*nz;
+      if(d<minOff){ const q=minOff-d; x+=nx*q; y+=ny*q; z+=nz*q; }
+    }
+    gp[o]=x; gp[o+1]=y; gp[o+2]=z;
+    gn[o]=nx; gn[o+1]=ny; gn[o+2]=nz;
+  }
+  const tri=g.cutTri, wt=g.cutW, nc=tri.length/3;
+  for(let k=0;k<nc;k++){
+    const k3=k*3, a=tri[k3]*3, b=tri[k3+1]*3, c=tri[k3+2]*3;
+    const w0=wt[k3], w1=wt[k3+1], w2=wt[k3+2];
+    let nx=w0*N[a]+w1*N[b]+w2*N[c], ny=w0*N[a+1]+w1*N[b+1]+w2*N[c+1], nz=w0*N[a+2]+w1*N[b+2]+w2*N[c+2];
+    const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1; nx/=nl; ny/=nl; nz/=nl;
+    const bx=w0*P[a]+w1*P[b]+w2*P[c], by=w0*P[a+1]+w1*P[b+1]+w2*P[c+1], bz=w0*P[a+2]+w1*P[b+2]+w2*P[c+2];
+    const o=(nd+k)*3;
+    let x=bx+nx*off, y=by+ny*off, z=bz+nz*off;
+    if(drape){
+      x+=disp[o]; y+=disp[o+1]; z+=disp[o+2];
+      const d=(x-bx)*nx+(y-by)*ny+(z-bz)*nz;
+      if(d<minOff){ const q=minOff-d; x+=nx*q; y+=ny*q; z+=nz*q; }
+    }
+    gp[o]=x; gp[o+1]=y; gp[o+2]=z;
+    gn[o]=nx; gn[o+1]=ny; gn[o+2]=nz;
+  }
+  if(drape && shade && g.gIndex) computeNormals(gp.subarray(0,g.count*3), g.gIndex, gn.subarray(0,g.count*3));
+  g.geo.attributes.position.needsUpdate=true;
+  g.geo.attributes.normal.needsUpdate=true;
 }
 
 function updateGarments(){
+  updateGarmentsNow();
+  queueDrape();
+}
+function updateGarmentsNow(){
   if(!bodyGeo) return;
   const P=bodyGeo.attributes.position.array, N=bodyGeo.attributes.normal.array;
-  const base=axes.H*0.0032;
   for(const kind in garments){
     const g=garments[kind];
     if(!g.mesh.visible||!g.count) continue;
-    const off=base*g.offsetMul*(state.clothing[kind].fit??1);
-    const gp=g.geo.attributes.position.array, gn=g.geo.attributes.normal.array;
-    const D=g.direct, nd=D.length;
-    for(let v=0;v<nd;v++){
-      const s=D[v]*3, o=v*3;
-      const nx=N[s], ny=N[s+1], nz=N[s+2];
-      gp[o]=P[s]+nx*off; gp[o+1]=P[s+1]+ny*off; gp[o+2]=P[s+2]+nz*off;
-      gn[o]=nx; gn[o+1]=ny; gn[o+2]=nz;
-    }
-    const tri=g.cutTri, wt=g.cutW, nc=tri.length/3;
-    for(let k=0;k<nc;k++){
-      const k3=k*3, a=tri[k3]*3, b=tri[k3+1]*3, c=tri[k3+2]*3;
-      const w0=wt[k3], w1=wt[k3+1], w2=wt[k3+2];
-      let nx=w0*N[a]+w1*N[b]+w2*N[c], ny=w0*N[a+1]+w1*N[b+1]+w2*N[c+1], nz=w0*N[a+2]+w1*N[b+2]+w2*N[c+2];
-      const nl=Math.sqrt(nx*nx+ny*ny+nz*nz)||1; nx/=nl; ny/=nl; nz/=nl;
-      const o=(nd+k)*3;
-      gp[o]  =w0*P[a]  +w1*P[b]  +w2*P[c]  +nx*off;
-      gp[o+1]=w0*P[a+1]+w1*P[b+1]+w2*P[c+1]+ny*off;
-      gp[o+2]=w0*P[a+2]+w1*P[b+2]+w2*P[c+2]+nz*off;
-      gn[o]=nx; gn[o+1]=ny; gn[o+2]=nz;
-    }
-    g.geo.attributes.position.needsUpdate=true;
-    g.geo.attributes.normal.needsUpdate=true;
+    writeGarment(g, kind, P, N, true, false);
   }
 }
+
+// Recompute the drape for the current body: smooth the plain shell and keep the difference.
+let normalsStale=false, heavyBody=false;
+function refitDrape(){
+  if(!bodyGeo) return;
+  if(normalsStale){
+    sub.run(coarsePos);
+    bodyGeo.attributes.normal.needsUpdate=true;
+    normalsStale=false;
+    if(!fabricIters){ updateGarmentsNow(); return; }
+  }
+  if(!fabricIters) return;
+  const P=bodyGeo.attributes.position.array, N=bodyGeo.attributes.normal.array;
+  for(const kind in garments){
+    const g=garments[kind];
+    if(!g.mesh.visible||!g.count||!g.adj) continue;
+    writeGarment(g, kind, P, N, false);
+    const gp=g.geo.attributes.position.array, n3=g.count*3;
+    const plain=gp.slice(0,n3);
+    smoothGarment(g, fabricIters);
+    if(!g.disp || g.disp.length!==n3) g.disp=new Float32Array(n3);
+    for(let i=0;i<n3;i++) g.disp[i]=gp[i]-plain[i];
+    writeGarment(g, kind, P, N, true, true);
+  }
+}
+let drapeTimer=0;
+function queueDrape(){
+  clearTimeout(drapeTimer);
+  drapeTimer=setTimeout(refitDrape, 220);
+}
+let fabricIters=1;
 
 function refreshClothingMaterials(){
   for(const kind in garments){
@@ -1127,10 +1365,10 @@ function applyBoneMorphs(){
   plantAndMeasure();
 }
 
-function applyMorphs(){
+function applyMorphs(quick){
   if(!currentModel) return;
   if(modelType==='skinned') applyBoneMorphs();
-  else if(modelType==='static') applyMeshMorphs();
+  else if(modelType==='static') applyMeshMorphs(quick);
 }
 
 /* ============================================================
@@ -1147,7 +1385,21 @@ function qualityUrl(u){
     return x.toString();
   }catch(e){ return u; }
 }
+// Processed bundled bodies are kept when switching away, so switching back is instant.
+const modelCache=new Map();
+
 function clearModel(){
+  if(modelType==='static' && currentBody && currentModel){
+    modelCache.set(BODIES[currentBody].url, {
+      currentModel, bodyMesh, bodyGeo, bodyMat, basePositions, bodyIndex, seg, LM, axes,
+      coarsePos, sub, surf, eyeMat, eyeParts, shoeInst, normScale, facing, fabricIters, heavyBody, garments:{...garments} });
+    avatarRoot.remove(currentModel);
+    for(const k in garments) delete garments[k];
+    currentModel=null; modelType=null; shoeInst=null; eyeMat=null; eyeParts=null;
+    bodyMesh=null; bodyGeo=null; bodyMat=null; basePositions=null; bodyIndex=null; seg=null; LM=null; axes=null;
+    coarsePos=null; sub=null; surf=null;
+    return;
+  }
   if(shoeInst){ shoeInst.forEach(s=>s.root.removeFromParent()); shoeInst=null; }  // shoe geometry is shared, keep it
   if(currentModel){
     avatarRoot.remove(currentModel);
@@ -1158,17 +1410,58 @@ function clearModel(){
   boneMap={}; BONE_BASE.clear(); footBones=[]; topBone=null;
   bodyMesh=null; bodyGeo=null; bodyMat=null; basePositions=null; bodyIndex=null; seg=null; LM=null; axes=null;
   coarsePos=null; sub=null; surf=null;
+  if(eyeMat){ eyeMat.dispose(); eyeMat=null; } eyeParts=null;
+}
+
+let loadSeq=0;
+function restoreModel(url, bodyKey){
+  ++loadSeq;
+  clearModel();
+  const r=modelCache.get(url); modelCache.delete(url);
+  ({ currentModel, bodyMesh, bodyGeo, bodyMat, basePositions, bodyIndex, seg, LM, axes,
+     coarsePos, sub, surf, eyeMat, eyeParts, shoeInst, normScale, facing, fabricIters, heavyBody } = r);
+  Object.assign(garments, r.garments);
+  modelType='static'; currentBody=bodyKey; targetHeight=BODIES[bodyKey].height;
+  avatarRoot.scale.setScalar(1); avatarRoot.position.set(0,0,0); avatarRoot.rotation.set(0,0,0);
+  avatarRoot.add(currentModel);
+  bodyMat.color.set(state.skinColor);
+  if(eyeMat) eyeMat.userData.u.irisCol.value.set(state.eyeColor);
+  for(const k in garments) rebuildGarment(k);      // clothing may have changed meanwhile
+  refreshClothingMaterials();
+  applyShoeLook(shoeMats, state.clothing.shoes);
+  buildUI();
+  applyMorphs();
+  attachShoes();
+  refitDrape();
+  frameModel();
+  faceCamera();
+  hideLoading();
+  state.modelUrl=url; state.body=bodyKey; save();
 }
 
 function loadModel(rawUrl){
+  const bodyKey=Object.keys(BODIES).find(k=>BODIES[k].url===rawUrl)||null;
+  if(bodyKey && modelCache.has(rawUrl)){
+    showLoading('Switching body…');
+    setTimeout(()=>restoreModel(rawUrl, bodyKey), 20);
+    return;
+  }
+  const seqNo=++loadSeq;
   showLoading('Loading model…');
-  loader.load(qualityUrl(rawUrl), gltf=>{
+  loader.load(qualityUrl(rawUrl), async gltf=>{
+    if(seqNo!==loadSeq) return;                         // a newer load replaced this one
+    showLoading('Analysing body shape…');
+    await new Promise(r=>setTimeout(r,30));             // let the message paint first
+    if(seqNo!==loadSeq) return;
     clearModel();
+    currentBody=bodyKey;
+    targetHeight=bodyKey ? BODIES[bodyKey].height : 1.75;
     currentModel=gltf.scene;
-    let skinned=null, firstMesh=null;
+    let skinned=null;
+    const meshes=[];
     currentModel.traverse(o=>{
       if(o.isSkinnedMesh&&!skinned) skinned=o;
-      if(o.isMesh&&!firstMesh) firstMesh=o;
+      if(o.isMesh&&!o.isSkinnedMesh) meshes.push(o);
       if(o.isMesh||o.isSkinnedMesh){
         o.castShadow=true; o.receiveShadow=true; o.frustumCulled=false;
         if(o.material){ o.material.envMapIntensity=1.0; o.material.needsUpdate=true; }
@@ -1183,9 +1476,9 @@ function loadModel(rawUrl){
       modelType='skinned';
       footBones=['LeftToeBase','RightToeBase','LeftFoot','RightFoot'].map(n=>boneMap[n]).filter(Boolean);
       topBone=boneMap['HeadTop_End']||boneMap['Head']||null;
-    } else if(firstMesh){
+    } else if(meshes.length){
       modelType='static';
-      setupStaticMesh(firstMesh);
+      setupStaticMesh(meshes);
     }
 
     // Centre the model on the origin so it spins in place and the camera orbits around it.
@@ -1197,7 +1490,7 @@ function loadModel(rawUrl){
     currentModel.position.x-=mid.x;
     currentModel.position.z-=mid.z;
     avatarRoot.updateMatrixWorld(true);
-    normScale=TARGET_HEIGHT/(raw.getSize(new THREE.Vector3()).y||1);
+    normScale=targetHeight/(raw.getSize(new THREE.Vector3()).y||1);
 
     if(modelType==='static'){
       makeGarment('socks',0.35);
@@ -1205,15 +1498,17 @@ function loadModel(rawUrl){
       makeGarment('shirt',1.7);
       refreshClothingMaterials();
     }
-
     buildUI();
     applyMorphs();
     attachShoes();
+    refitDrape();
     frameModel();
     faceCamera();
     hideLoading();
 
-    state.modelUrl=rawUrl; save();
+    state.modelUrl=rawUrl;
+    if(bodyKey) state.body=bodyKey;
+    save();
     document.getElementById('empty').hidden=true;
     const pill=document.getElementById('statePill');
     pill.textContent = modelType==='skinned'?'Rigged avatar':'Mesh model';
@@ -1227,26 +1522,169 @@ function loadModel(rawUrl){
   });
 }
 
-function setupStaticMesh(mesh){
-  bodyMesh=mesh;
-  const srcGeo=mesh.geometry;
+// Weld vertices that share a position (models split into pieces duplicate them along the
+// seams, which would otherwise show as shading seams) and drop triangles that collapse.
+// Spatial hash on quantized positions (typed arrays, open addressing): gives each vertex the
+// id of the first vertex at the same spot. `order` lists which vertices to visit.
+function positionIds(P, order, eps){
+  let m0=Infinity,m1=Infinity,m2=Infinity;
+  for(let k=0;k<order.length;k++){ const v=order[k]*3; if(P[v]<m0)m0=P[v]; if(P[v+1]<m1)m1=P[v+1]; if(P[v+2]<m2)m2=P[v+2]; }
+  let cap=1; while(cap<order.length*2) cap<<=1;
+  const kx=new Int32Array(cap), ky=new Int32Array(cap), kz=new Int32Array(cap), val=new Int32Array(cap).fill(-1);
+  const ids=new Int32Array(P.length/3).fill(-1), firsts=[];
+  const mask=cap-1;
+  for(let k=0;k<order.length;k++){
+    const v=order[k]; if(ids[v]>=0) continue;
+    const x=Math.round((P[v*3]-m0)/eps)|0, y=Math.round((P[v*3+1]-m1)/eps)|0, z=Math.round((P[v*3+2]-m2)/eps)|0;
+    let h=(Math.imul(x,73856093)^Math.imul(y,19349663)^Math.imul(z,83492791))&mask;
+    while(val[h]>=0 && !(kx[h]===x && ky[h]===y && kz[h]===z)) h=(h+1)&mask;
+    if(val[h]<0){ kx[h]=x; ky[h]=y; kz[h]=z; val[h]=firsts.length; firsts.push(v); }
+    ids[v]=val[h];
+  }
+  return { ids, count:firsts.length, firsts };
+}
+
+// Only the vertices this index range uses are visited; the result is compact.
+function weldMesh(P, I){
+  let m=[Infinity,Infinity,Infinity], M=[-Infinity,-Infinity,-Infinity];
+  for(let k=0;k<I.length;k++){ const v=I[k]*3; for(let a=0;a<3;a++){ const q=P[v+a]; if(q<m[a])m[a]=q; if(q>M[a])M[a]=q; } }
+  const eps=Math.max(M[0]-m[0],M[1]-m[1],M[2]-m[2])*1e-5 || 1e-9;
+  const { ids:remap, count:nOut, firsts }=positionIds(P, I, eps);
+  const out=new Float32Array(nOut*3);
+  for(let j=0;j<nOut;j++){ const v=firsts[j]*3; out[j*3]=P[v]; out[j*3+1]=P[v+1]; out[j*3+2]=P[v+2]; }
+  const idx=new Uint32Array(I.length); let nIdx=0;
+  for(let f=0;f<I.length;f+=3){
+    const a=remap[I[f]], b=remap[I[f+1]], c=remap[I[f+2]];
+    if(a!==b && b!==c && a!==c){ idx[nIdx++]=a; idx[nIdx++]=b; idx[nIdx++]=c; }
+  }
+  return { pos:out.slice(0,nOut*3), index:idx.slice(0,nIdx) };
+}
+
+let eyeMat=null, eyeParts=null;
+function makeEyeMaterial(){
+  // No textures on the eyes, so the iris and pupil are drawn from each fragment's angle to
+  // the eyeball's forward axis.
+  const u={ eyeC0:{value:new THREE.Vector3()}, eyeC1:{value:new THREE.Vector3()},
+            eyeFwd:{value:new THREE.Vector3(0,0,1)}, irisCol:{value:new THREE.Color(state.eyeColor)} };
+  const m=new THREE.MeshPhysicalMaterial({ color:0xffffff, roughness:0.22, metalness:0,
+    clearcoat:1, clearcoatRoughness:0.04, envMapIntensity:1 });
+  m.userData.u=u;
+  m.onBeforeCompile=sh=>{
+    Object.assign(sh.uniforms,u);
+    sh.vertexShader='varying vec3 vObjPos;\n'+sh.vertexShader
+      .replace('#include <begin_vertex>','#include <begin_vertex>\n  vObjPos = transformed;');
+    sh.fragmentShader='uniform vec3 eyeC0;\nuniform vec3 eyeC1;\nuniform vec3 eyeFwd;\nuniform vec3 irisCol;\nvarying vec3 vObjPos;\n'
+      +sh.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
+  vec3 ec = distance(vObjPos, eyeC0) < distance(vObjPos, eyeC1) ? eyeC0 : eyeC1;
+  float k = dot(normalize(vObjPos - ec), eyeFwd);
+  float iris   = smoothstep(0.852, 0.872, k);
+  float ring   = iris * (1.0 - smoothstep(0.872, 0.905, k));
+  float radial = smoothstep(0.872, 0.975, k);
+  float pupil  = smoothstep(0.972, 0.979, k);
+  vec3 col = mix(vec3(0.92, 0.9, 0.87), irisCol * (0.65 + 0.6 * radial), iris);
+  col = mix(col, irisCol * 0.22, ring * 0.75);
+  col = mix(col, vec3(0.012), pupil);
+  diffuseColor.rgb = col;`);
+  };
+  return m;
+}
+
+// Eyeball centres follow the head as it is reshaped.
+function updateEyes(P){
+  if(!eyeMat || !eyeParts) return;
+  const {ui,wi,di}=axes, u=eyeMat.userData.u;
+  const cs=eyeParts.map(list=>{
+    let x=0,y=0,z=0;
+    for(let k=0;k<list.length;k++){ const o=list[k]*3; x+=P[o]; y+=P[o+1]; z+=P[o+2]; }
+    return new THREE.Vector3(x/list.length, y/list.length, z/list.length);
+  });
+  u.eyeC0.value.copy(cs[0]); u.eyeC1.value.copy(cs[cs.length>1?1:0]);
+  const f=LM.frame.f; u.eyeFwd.value.set(f[0],f[1],f[2]);
+}
+
+// Split the eye triangles into eyeballs (connected pieces), falling back to left/right halves.
+function findEyeParts(range){
+  const verts=new Set();
+  for(let i=range.start;i<range.start+range.count;i++) verts.add(bodyIndex[i]);
+  const list=[...verts];
+  const par=new Map(list.map(v=>[v,v]));
+  const find=a=>{ while(par.get(a)!==a){ par.set(a,par.get(par.get(a))); a=par.get(a); } return a; };
+  for(let i=range.start;i<range.start+range.count;i+=3){
+    const a=find(bodyIndex[i]), b=find(bodyIndex[i+1]), c=find(bodyIndex[i+2]);
+    if(a!==b) par.set(a,b); const bb=find(b); if(find(c)!==bb) par.set(find(c),bb);
+  }
+  const groups=new Map();
+  for(const v of list){ const r=find(v); if(!groups.has(r)) groups.set(r,[]); groups.get(r).push(v); }
+  let parts=[...groups.values()].sort((p,q)=>q.length-p.length).slice(0,2);
+  if(parts.length<2){
+    const {wi,wCen}=axes;
+    parts=[list.filter(v=>basePositions[v*3+wi]<wCen), list.filter(v=>basePositions[v*3+wi]>=wCen)].filter(p=>p.length);
+  }
+  return parts.map(p=>Uint32Array.from(p));
+}
+
+function setupStaticMesh(meshes){
+  currentModel.updateMatrixWorld(true);
+  // the largest piece hosts the merged body; the others are baked into its frame
+  const host=meshes.reduce((a,m)=>m.geometry.attributes.position.count>a.geometry.attributes.position.count?m:a);
+  bodyMesh=host;
+  const srcGeo=host.geometry;
+  const inv=new THREE.Matrix4().copy(host.matrixWorld).invert();
+
+  // group the pieces by material, the host's material (the skin) first
+  const byMat=new Map();
+  for(const m of meshes){ if(!byMat.has(m.material)) byMat.set(m.material,[]); byMat.get(m.material).push(m); }
+  const matOrder=[host.material, ...[...byMat.keys()].filter(k=>k!==host.material)];
+  const posParts=[], idxParts=[], ranges=[];
+  let vOff=0, iOff=0;
+  for(const mat of matOrder){
+    const start=iOff;
+    for(const m of byMat.get(mat)){
+      const g=m.geometry.clone();
+      if(m!==host) g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv,m.matrixWorld));
+      const p=g.attributes.position.array, nv=p.length/3;
+      const ix=g.index ? g.index.array : Uint32Array.from({length:nv},(_,i)=>i);
+      const out=new Uint32Array(ix.length);
+      for(let k=0;k<ix.length;k++) out[k]=ix[k]+vOff;
+      posParts.push(p); idxParts.push(out);
+      vOff+=nv; iOff+=ix.length;
+      g.dispose();
+    }
+    ranges.push({mat, start, end:iOff});
+  }
+  const P=new Float32Array(vOff*3); let o=0; for(const p of posParts){ P.set(p,o); o+=p.length; }
+  const I=new Uint32Array(iOff); o=0; for(const ix of idxParts){ I.set(ix,o); o+=ix.length; }
+
+  // weld each material range separately so group boundaries stay intact
+  const welded=ranges.map(r=>weldMesh(P, I.subarray(r.start,r.end)));
+  basePositions=new Float32Array(welded.reduce((a,w)=>a+w.pos.length,0));
+  bodyIndex=new Uint32Array(welded.reduce((a,w)=>a+w.index.length,0));
+  const groups=[];
+  let vBase=0, iBase=0;
+  welded.forEach((w,gi)=>{
+    basePositions.set(w.pos, vBase*3);
+    for(let k=0;k<w.index.length;k++) bodyIndex[iBase+k]=w.index[k]+vBase;
+    groups.push({start:iBase, count:w.index.length, mat:ranges[gi].mat, materialIndex:gi});
+    vBase+=w.pos.length/3; iBase+=w.index.length;
+  });
+  for(const m of meshes) if(m!==host){ m.removeFromParent(); m.geometry.dispose(); }
+
   // soft, skin-like shading: a faint warm sheen reads as light scattering under the skin
-  if(mesh.material) mesh.material.dispose();
   bodyMat=new THREE.MeshPhysicalMaterial({
     color:new THREE.Color(state.skinColor), roughness:0.6, metalness:0.0,
     sheen:0.28, sheenRoughness:0.6, sheenColor:new THREE.Color('#e8866f'),
     specularIntensity:0.45, clearcoat:0.04, clearcoatRoughness:0.6, envMapIntensity:0.8
   });
-  mesh.material=bodyMat;
-
-  const pos=srcGeo.attributes.position;
-  basePositions=pos.array.slice(0);
-  if(srcGeo.index) bodyIndex=Uint32Array.from(srcGeo.index.array);
-  else {
-    const n=pos.count, seq=new Uint32Array(n);
-    for(let i=0;i<n;i++) seq[i]=i;
-    bodyIndex=seq;
-  }
+  eyeMat=null; eyeParts=null;
+  let eyeRange=null;
+  const mats=groups.map((g,gi)=>{
+    if(gi===0) return bodyMat;
+    if(/eye/i.test(g.mat.name||'') && !eyeMat){ eyeMat=makeEyeMaterial(); eyeRange=g; return eyeMat; }
+    return g.mat;
+  });
+  for(const g of groups) if(g.mat!==host.material && g.mat!==eyeMat && !mats.includes(g.mat)) g.mat.dispose();
+  if(host.material && !mats.includes(host.material)) host.material.dispose();
+  host.material = mats.length>1 ? mats : bodyMat;
 
   // axis detection
   const b=basePositions;
@@ -1262,19 +1700,35 @@ function setupStaticMesh(mesh){
         wHalf:Math.max((mx[wi]-mn[wi])/2,1e-6), H:Math.max(mx[ui]-mn[ui],1e-6)};
   buildSegmentation();
 
-  // display mesh = the control mesh smoothed by curved subdivision
+  // display mesh = the control mesh, smoothed by curved subdivision if it is low-poly
   coarsePos=basePositions.slice(0);
-  sub=new PNSubdivider(bodyIndex, basePositions.length/3, SUBDIV_LEVELS);
+  const levels=subdivLevelsFor(bodyIndex.length/3);
+  heavyBody = bodyIndex.length/3 > 120000;
+  fabricIters = levels===0 ? 10 : 2;         // detailed sculpts need more fabric smoothing
+  sub=new PNSubdivider(bodyIndex, basePositions.length/3, levels);
   const geo=new THREE.BufferGeometry();
   geo.setIndex(new THREE.BufferAttribute(sub.fineIndex,1));
   geo.setAttribute('position', new THREE.BufferAttribute(sub.outPos,3));
   geo.setAttribute('normal',   new THREE.BufferAttribute(sub.outNor,3));
-  mesh.geometry=geo; bodyGeo=geo;
+  if(groups.length>1){
+    const k=4**levels;                       // each level splits a triangle into four, in order
+    for(const g of groups) geo.addGroup(g.start*k, g.count*k, g.materialIndex);
+  }
+  host.geometry=geo; bodyGeo=geo;
   srcGeo.dispose();
+  if(eyeRange) eyeParts=findEyeParts(eyeRange);
   sub.run(coarsePos);                       // fill it now so the model can be measured
+  updateEyes(coarsePos);
   updateBodyBounds();
   surf={ index:sub.fineIndex, t:sub.field(seg.t), armW:sub.field(seg.armW),
          armParam:sub.field(seg.armParam), front:sub.field(seg.front) };
+  // each surface triangle's height range, so garments can skip whole bands quickly
+  const fi=surf.index, ft=surf.t, T=fi.length/3;
+  surf.triLo=new Float32Array(T); surf.triHi=new Float32Array(T);
+  for(let f=0;f<T;f++){
+    const a=ft[fi[f*3]], b=ft[fi[f*3+1]], c=ft[fi[f*3+2]];
+    surf.triLo[f]=Math.min(a,b,c); surf.triHi[f]=Math.max(a,b,c);
+  }
 }
 
 function frameModel(){
@@ -1293,17 +1747,14 @@ function frameModel(){
 // Turn the model so its face points at the default camera.
 function faceCamera(){
   if(modelType!=='static'||!bodyGeo) return;
-  // The face side has more geometry detail; compare vertex mass in front/back halves
-  // of the depth axis around the head to decide which way is forward.
-  const b=basePositions, {ui,di,upMin,dCen,H}=axes;
-  let front=0, back=0;
-  for(let i=0;i<b.length;i+=3){
-    const t=(b[i+ui]-upMin)/H; if(t<0.86) continue;
-    if(b[i+di]>dCen) front++; else back++;
-  }
-  // more detail (vertices) on the face side
-  facing = (front>=back) ? 0 : Math.PI;
+  // The segmentation found the front in the mesh's own axes (from the feet); take it through
+  // the model's transform into the scene and turn it towards the camera (+z).
+  avatarRoot.rotation.set(0,0,0);
+  avatarRoot.updateMatrixWorld(true);
+  const f=new THREE.Vector3(...LM.frame.f).transformDirection(bodyMesh.matrixWorld);
+  facing=-Math.atan2(f.x, f.z);
   avatarRoot.rotation.y=facing;
+  avatarRoot.updateMatrixWorld(true);
 }
 
 /* ============================================================
@@ -1319,7 +1770,7 @@ function makeSlider(key, onInput){
   const d=PARAMS[key];
   const c=el('div','ctrl');
   const row=el('div','row');
-  const lab=el('label'); lab.textContent=d.label; lab.htmlFor='sl_'+key;
+  const lab=el('label'); lab.textContent=paramLabel(key); lab.htmlFor='sl_'+key;
   const out=el('span','out'); out.textContent=fmtParam(key,state.params[key]);
   row.append(lab,out);
   const inp=document.createElement('input');
@@ -1379,9 +1830,17 @@ function renderUI(){
   sliderEls={};
   /* ---------- BODY TAB ---------- */
   paneBody.innerHTML='';
+
+  // body type switch
+  const bg=el('div','group');
+  bg.appendChild(el('h3',null,'<span class="dot"></span>Body type'));
+  bg.appendChild(segmented(Object.entries(BODIES).map(([k,v])=>[k,v.label]), currentBody, k=>switchBody(k)));
+  paneBody.appendChild(bg);
+
   const pg=el('div','group');
   pg.appendChild(el('h3',null,'<span class="dot"></span>Presets'));
   const pwrap=el('div','preset-grid');
+  const PRESETS=presetsFor();
   Object.keys(PRESETS).forEach(name=>{
     const b=el('button','chip'); b.textContent=name;
     b.addEventListener('click',()=>{
@@ -1419,11 +1878,25 @@ function renderUI(){
       tones.appendChild(s);
     });
     g.appendChild(tones);
+    if(eyeMat){
+      g.appendChild(el('div','field-label','Eye colour'));
+      const eyes=el('div','tone-row');
+      EYE_COLORS.forEach(([c,name])=>{
+        const s=el('button','tone'+(state.eyeColor===c?' on':'')); s.style.background=c; s.title=name;
+        s.setAttribute('aria-label',name+' eyes');
+        s.addEventListener('click',()=>{ state.eyeColor=c; eyeMat.userData.u.irisCol.value.set(c); buildUI(); save(); });
+        eyes.appendChild(s);
+      });
+      g.appendChild(eyes);
+    }
     paneBody.appendChild(g);
 
+    const credits=[];
+    if(currentBody) credits.push(['Body',BODIES[currentBody].credit]);
+    credits.push(['Shoe',SHOE_CREDIT]);
     const cg=el('div','group');
-    cg.appendChild(el('div','credit', CREDITS.map(c=>
-      `${c.what}: “${c.title}” by ${c.author} · <a href="${c.url}" target="_blank" rel="noopener">Sketchfab</a> · ${c.license}`).join('<br>')));
+    cg.appendChild(el('div','credit', credits.map(([what,c])=>
+      `${what}: “${c.title}” by ${c.author} · <a href="${c.url}" target="_blank" rel="noopener">Sketchfab</a> · CC-BY-4.0`).join('<br>')));
     paneBody.appendChild(cg);
   }
 
@@ -1560,6 +2033,15 @@ function renderUI(){
   }
 }
 
+// Switch between the bundled bodies. Each keeps its own shape; clothing is shared.
+function switchBody(key){
+  if(key===currentBody || !BODIES[key]) return;
+  if(currentBody) state.bodyParams[currentBody]={...state.params};
+  state.params={...defaultParams(), ...(state.bodyParams[key]||{})};
+  state.body=key;
+  loadModel(BODIES[key].url);
+}
+
 function segmented(options, value, onPick){
   const w=el('div','seg');
   w.setAttribute('role','radiogroup');
@@ -1599,7 +2081,7 @@ function tweenParams(target, ms=420){
     const p=dur?Math.min(1,(now-start)/dur):1;
     const e=p<0.5?4*p*p*p:1-Math.pow(-2*p+2,3)/2;   // easeInOutCubic
     for(const k in target) state.params[k]=from[k]+(target[k]-from[k])*e;
-    syncSliders(); applyMorphs();
+    syncSliders(); applyMorphs(p<1);
     if(p<1) requestAnimationFrame(step); else save();
   }
   requestAnimationFrame(step);
@@ -1635,6 +2117,7 @@ document.getElementById('resetBtn').addEventListener('click',()=>{
   for(const k in PARAMS) state.params[k]=PARAMS[k].def;
   state.clothing=JSON.parse(JSON.stringify(CLOTHING));
   state.skinColor='#c8a184'; state.fabric=0.78;
+  state.eyeColor='#5a3a22'; if(eyeMat) eyeMat.userData.u.irisCol.value.set(state.eyeColor);
   if(bodyMat) bodyMat.color.set(state.skinColor);
   buildUI();
   for(const k in garments) rebuildGarment(k);
@@ -1678,7 +2161,7 @@ const reduceMotion=window.matchMedia&&window.matchMedia('(prefers-reduced-motion
 // Keep the view's focus point on the model so panning can't lose it below the floor.
 const _clampShift=new THREE.Vector3();
 function clampTarget(){
-  const t=controls.target, h=TARGET_HEIGHT*(state.params.height||1);
+  const t=controls.target, h=targetHeight*(state.params.height||1);
   _clampShift.set(
     Math.min(0.8,Math.max(-0.8,t.x))-t.x,
     Math.min(h*1.05,Math.max(0.05,t.y))-t.y,
@@ -1699,8 +2182,10 @@ function loop(){
 ============================================================ */
 const KEY='bodyforge.v3';
 function save(){
+  if(currentBody) state.bodyParams[currentBody]={...state.params};
   try{ localStorage.setItem(KEY,JSON.stringify({
     params:state.params, skinColor:state.skinColor, modelUrl:state.modelUrl,
+    body:state.body, bodyParams:state.bodyParams, eyeColor:state.eyeColor,
     clothing:state.clothing, fabric:state.fabric })); }catch(e){}
 }
 function load(){
@@ -1709,6 +2194,9 @@ function load(){
     if(d.params) for(const k in PARAMS){ if(typeof d.params[k]==='number') state.params[k]=d.params[k]; }
     if(d.skinColor) state.skinColor=d.skinColor;
     if(d.modelUrl) state.modelUrl=d.modelUrl;
+    if(d.body && BODIES[d.body]) state.body=d.body;
+    if(d.bodyParams && typeof d.bodyParams==='object') state.bodyParams=d.bodyParams;
+    if(d.eyeColor) state.eyeColor=d.eyeColor;
     if(d.clothing) for(const k in state.clothing) Object.assign(state.clothing[k], d.clothing[k]||{});
     if(typeof d.fabric==='number') state.fabric=d.fabric;
   }catch(e){}
@@ -1717,7 +2205,7 @@ function load(){
 load();
 resize();
 loop();
-loadModel(state.modelUrl||DEFAULT_MODEL);
+loadModel(state.modelUrl || BODIES[state.body].url);
 loader.load(SHOE_MODEL, g=>{
   shoeTemplate=buildShoeTemplate(g);
   attachShoes();
@@ -1726,7 +2214,8 @@ loader.load(SHOE_MODEL, g=>{
 // Dev-server-only handle for inspecting the scene from the console (removed from builds).
 if(import.meta.env.DEV) window.__bodyforge={ camera, controls, state, applyMorphs, buildUI, avatarRoot,
   get bodyMesh(){ return bodyMesh; }, get shoes(){ return shoeInst; }, THREE,
-  get internals(){ return { seg, LM, axes, footFit, coarsePos, shoeTemplate }; } };
+  get internals(){ return { seg, LM, axes, footFit, coarsePos, shoeTemplate, basePositions, bodyIndex }; },
+  weldMesh, positionIds };
 
 setupControlsLegend({
   viewport, canvas, camera, controls,
