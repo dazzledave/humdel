@@ -234,6 +234,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(
 /* tone / colour palette row */
 .tone-row{display:flex;flex-wrap:wrap;gap:6px;padding:10px 0 2px;}
 .tone{width:24px;height:24px;border-radius:6px;border:1px solid var(--line-2);cursor:pointer;padding:0;transition:transform .1s;}
+.tone.on{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent);}
 .tone:hover{transform:scale(1.12);border-color:var(--accent);}
 
 /* sub-sections, segmented controls, style chips */
