@@ -72,10 +72,16 @@ How the parts move:
 - Arms ride on the torso: they shift out by exactly how much the torso grew at the armpit
   plus shoulder width, stretch from the shoulder pivot, and hands scale as one piece about
   the wrist. The shoulder line raises or drops the shoulders and arms together.
-- A second pass measures how much the body grew at every height and pushes the arms out
-  wherever a bigger belly or hips would otherwise clip through them.
-- Legs thicken about their own axes (thighs and calves separately), with a centre-continuous
-  axis near the crotch so the surface never tears. Feet stay planted.
+- A second pass measures the body's width at every height and keeps the arms half their
+  original clearance away from it — pushing them out around a bigger belly or hips, and
+  stopping them entering the ribs when narrow shoulders or a slimmer build draw them in.
+- Legs thicken about their own axes, with a centre-continuous axis near the crotch so the
+  surface never tears. Thighs grow less on the inner face so they stay clear of each other,
+  eased across the leg rather than switched at its centre line. The calf is added as a
+  muscle two thirds of the way up the shin that tapers into the ankle.
+- Belly, chest and glutes are soft masses: each is a rounded bulge that fades out smoothly
+  top and bottom and wraps round into the flanks, so nothing forms a shelf or a seam. A
+  bigger belly also hangs lower. Feet stay planted.
 - Overall height also broadens the body a little, so tall bodies stay in proportion.
 
 The deformed control mesh (~10k triangles) is then smoothed by two levels of curved
