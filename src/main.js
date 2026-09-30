@@ -214,7 +214,6 @@ const footFit=[null,null];
 ============================================================ */
 const clamp01=v=>v<0?0:v>1?1:v;
 function smoothstep(e0,e1,x){ const t=clamp01((x-e0)/(e1-e0||1e-6)); return t*t*(3-2*t); }
-function win(t,lo,hi,f){ return smoothstep(lo,lo+f,t)*(1-smoothstep(hi-f,hi,t)); }
 
 /* ============================================================
    SEGMENTATION — builds a procedural "rig" from the mesh topology.
@@ -237,6 +236,13 @@ function buildSegmentation(){
     ax[i]=Math.abs(dx); side[i]=dx<0?0:1;
   }
   const clampS=s=>Math.min(SL-1,Math.max(0,s));
+  // Read a per-slice profile at an exact height. Taking the slice's own value makes every
+  // profile a staircase, so any girth change steps between neighbouring slices — a stack of
+  // fine ridges across the flank, which a dense mesh shows and a smoothed one hides.
+  const lerpS=(A,tt)=>{
+    const p=tt*SL-0.5, s0=clampS(Math.floor(p)), s1=clampS(s0+1);
+    return A[s0]+(A[s1]-A[s0])*clamp01(p-s0);
+  };
 
   /* ---- topology: weld by position, then union-find on a vertex subset ---- */
   const all=new Uint32Array(n); for(let i=0;i<n;i++) all[i]=i;
@@ -447,6 +453,20 @@ function buildSegmentation(){
     for(let s=Math.max(0,crotchS);s<SL;s++){ LX[sd][s]=topX; LD[sd][s]=topD; }
   }
 
+  // how wide each leg is at each height, used to tell the inner face of a leg from the outer
+  const LR=[new Float64Array(SL),new Float64Array(SL)];
+  for(let i=0;i<n;i++){
+    if(!legComp[i]) continue;
+    const sd=legComp[i]-1, s=sliceOf[i], d=Math.abs(b[i*3+wi]-LX[sd][s]);
+    if(d>LR[sd][s]) LR[sd][s]=d;
+  }
+  for(let sd=0;sd<2;sd++){
+    let carry=0; for(let s=0;s<SL;s++){ if(LR[sd][s]>0) carry=LR[sd][s]; else LR[sd][s]=carry; }
+    if(!carry) LR[sd].fill(0.1*wHalf);
+    const src=LR[sd].slice();
+    for(let s=0;s<SL;s++){ let a=0,c=0; for(let k=-2;k<=2;k++){ const j=s+k; if(j>=0&&j<SL){ a+=src[j]; c++; } } LR[sd][s]=Math.max(a/c,1e-5); }
+  }
+
   /* ---- feet: depth bulge near the floor ---- */
   let footTopT=0.055, maxDepth=0, maxS=0;
   const dExt=new Float64Array(SL);
@@ -503,7 +523,7 @@ function buildSegmentation(){
   /* ---- per-vertex precomputed weights / axes ---- */
   const F=()=>new Float32Array(n);
   const segK=new Uint8Array(n), segA=F(), wBuild=F(), wTorsoD=F(), shBand=F(), latW=F(), Rt=F(),
-        legW=F(), spreadT=F(), footW=F(), laW=F(), laD=F(), armAxW=F(), armAxD=F(), handW=F();
+        legW=F(), spreadT=F(), footW=F(), laW=F(), laD=F(), armAxW=F(), armAxD=F(), handW=F(), legOut=F();
   for(let i=0;i<n;i++){
     const tt=t[i], s=sliceOf[i], sd=side[i];
     let k=0; while(k<ctrlT.length-2 && tt>ctrlT[k+1]) k++;
@@ -512,25 +532,39 @@ function buildSegmentation(){
     wTorsoD[i]=1-smoothstep(nT-0.01,nT+0.03,tt);
     shBand[i]=smoothstep(cutT-0.09,cutT-0.01,tt)*(1-smoothstep(nT-0.005,nT+0.035,tt));
     latW[i]=smoothstep(0.30*Rsh,0.85*Rsh,ax[i]);
-    Rt[i]=Rc[s];
+    // Rigid-beyond-radius keeps the deltoids from ballooning, but below the armpit the slice
+    // holds nothing but torso, and there the smoothed radius can dip under the true one and
+    // flip whole rows of vertices to the rigid branch — which corrugates the flank as soon as
+    // the waist or belly grows. Below the armpit, let every torso vertex scale.
+    const Rct=lerpS(Rc,tt);
+    Rt[i]=(!armComp[i] && s<cutS) ? Math.max(Rct, ax[i]) : Rct;
     legW[i]=1-smoothstep(cT-0.05,cT+0.04,tt);
     spreadT[i]=smoothstep(footTopT,cT,tt);
     footW[i]=1-smoothstep(footTopT-0.008,footTopT+0.035,tt);
     handW[i]=1-smoothstep(wristT-0.01,wristT+0.018,tt);
-    armAxW[i]=AX[armComp[i]?armComp[i]-1:sd][s];
-    armAxD[i]=AD[armComp[i]?armComp[i]-1:sd][s];
+    const as=armComp[i]?armComp[i]-1:sd;
+    armAxW[i]=lerpS(AX[as],tt);
+    armAxD[i]=lerpS(AD[as],tt);
 
     // leg axis: component axis deep in the leg, a centre-continuous profile near the crotch
-    const A=LX[sd][s], Ad=LD[sd][s];
+    const A=lerpS(LX[sd],tt), Ad=lerpS(LD[sd],tt);
     const reach=Math.max(Math.abs(A-wCen),1e-6);
     const prof=smoothstep(0,reach,ax[i]);
     const pW=wCen+(A-wCen)*prof, pD=dCen+(Ad-dCen)*prof;
     if(legComp[i]){
       const ls=legComp[i]-1;
-      const fW=LX[ls][s], fD=LD[ls][s];
+      const fW=lerpS(LX[ls],tt), fD=lerpS(LD[ls],tt);
       const h=smoothstep(cT-0.08,cT,tt);
       laW[i]=fW+(pW-fW)*h; laD[i]=fD+(pD-fD)*h;
     } else { laW[i]=pW; laD[i]=pD; }
+
+    // Thighs grow less on the inside so they do not push through each other. Deciding that
+    // with a yes/no test puts the change of rate exactly on the leg's centre line, which
+    // reads as a seam running the length of the leg, so read it off as a gradient across
+    // the leg instead: 0 on the inner face, 1 on the outer.
+    const ls2=legComp[i]?legComp[i]-1:sd;
+    const outward=laW[i]-wCen<0?-1:1;
+    legOut[i]=smoothstep(-0.55,0.55,(b[i*3+wi]-laW[i])*outward/lerpS(LR[ls2],tt));
   }
 
   /* ---- which way the body faces: the feet reach forward from the ankles ---- */
@@ -571,27 +605,53 @@ function buildSegmentation(){
 
   /* ---- clothing + muscle fields ---- */
   const kneeT=footTopT+0.52*(cT-footTopT);
-  const armParam=F(), front=F(), back=F(), dMid=F(),
-        wFore=F(), wCalf=F(), wBelly=F(), wPec=F(), wGlute=F();
+  const armParam=F(), front=F(), back=F(), dMid=F(), wrapF=F(), wrapB=F(),
+        wFore=F(), wCalf=F(), wShank=F(), wBelly=F(), wBellyLow=F(), wPec=F(), wGlute=F();
   const pU=upMin+pivotT*H, wU=upMin+wristT*H;
+
+  // Soft masses — belly, chest, glutes. A window with flat ends creases where its slope
+  // changes, so each is a bump whose value and first two derivatives all fade out: the
+  // abdomen blends into the pubic area and the ribs, the chest into the stomach, the seat
+  // into the thighs, none of them with a lip. The belly reaching below the crotch lets the
+  // leg blend finish its fade rather than cutting it off, and it gets a second profile that
+  // hangs lower — a big gut sags — mixed in per frame by how far the slider is pushed.
+  const torsoH=Math.max(cutT-cT, 0.12);
+  const navelT=cT+0.50*torsoH, belowR=0.70*torsoH, aboveR=0.56*torsoH;
+  const sagT=navelT-0.17*torsoH;
+  const pecT=cutT-0.17*torsoH, pecDn=0.42*torsoH, pecUp=0.30*torsoH;
+  const gluT=cT+0.07*torsoH, gluR=0.40*torsoH;
+  const bump=x=>{ const a=Math.min(Math.abs(x),1), s=1-a*a; return s*s*s; };
+  const massAt=(tt,cen,dn,up)=>bump((tt-cen)/(tt<cen?dn:up));
+  // the calf muscle: full about two thirds of the way up the shin, a fifth of it left at
+  // the ankle, gone by the knee
+  const shinH=Math.max(kneeT-footTopT,0.05);
+  const calfT=footTopT+0.62*shinH, calfDn=(calfT-footTopT)/0.644, calfUp=(kneeT-calfT)*1.15;
   for(let i=0;i<n;i++){
-    const tt=t[i], s=sliceOf[i];
+    const tt=t[i];
     const sd=armComp[i]?armComp[i]-1:side[i];
     const px=LM.pivotAx[sd], pd=LM.pivotAxD[sd];
     const dx=LM.wristAx[sd]-px, du=wU-pU, dd=LM.wristAxD[sd]-pd;
     const L2=(dx*dx+du*du+dd*dd)||1;
     armParam[i]=((b[i*3+wi]-px)*dx+(b[i*3+ui]-pU)*du+(b[i*3+di]-pd)*dd)/L2;
 
-    dMid[i]=dMidS[s];
-    const rel=(b[i*3+di]-dMidS[s])/dHalfS[s];          // -1 back … +1 front
+    const dm=lerpS(dMidS,tt);
+    dMid[i]=dm;
+    const rel=(b[i*3+di]-dm)/lerpS(dHalfS,tt);         // -1 back … +1 front
     front[i]=smoothstep(0.05,0.75, frontSign*rel);
     back[i] =smoothstep(0.05,0.75,-frontSign*rel);
+    // how far round the waist the belly reaches: a smooth polynomial, so the flanks pick the
+    // bulge up gradually instead of through a smoothstep knot that shows as a vertical crease
+    const wr=clamp01(0.5+0.5*frontSign*rel);
+    wrapF[i]=wr*wr;
+    wrapB[i]=(1-wr)*(1-wr);
 
     wFore[i] =smoothstep(0.38,0.62,armParam[i]);
-    wCalf[i] =1-smoothstep(kneeT-0.02,kneeT+0.05,tt);
-    wBelly[i]=win(tt,cT+0.02,cT+0.23,0.07);
-    wPec[i]  =win(tt,cutT-0.10,cutT+0.035,0.045);
-    wGlute[i]=win(tt,cT-0.09,cT+0.09,0.06);
+    wCalf[i] =1-smoothstep(kneeT-0.02,kneeT+0.05,tt);      // below the knee
+    wShank[i]=bump((tt-calfT)/(tt<calfT?calfDn:calfUp));   // the calf muscle itself
+    wBelly[i]   =massAt(tt,navelT,belowR,aboveR);
+    wBellyLow[i]=massAt(tt,sagT,belowR,aboveR);
+    wPec[i]     =massAt(tt,pecT,pecDn,pecUp);
+    wGlute[i]   =massAt(tt,gluT,gluR,gluR);
   }
 
   /* ---- foot vertices per side (for fitting shoes) ---- */
@@ -632,8 +692,8 @@ function buildSegmentation(){
   LM.kneeT=kneeT;
   LM.footAxis=footAxis;
 
-  seg={t,ax,side,sliceOf,armW,handW,segK,segA,wBuild,wTorsoD,shBand,latW,Rt,armParam,front,back,dMid,
-       wFore,wCalf,wBelly,wPec,wGlute,legW,spreadT,footW,laW,laD,armAxW,armAxD,
+  seg={t,ax,side,sliceOf,armW,handW,segK,segA,wBuild,wTorsoD,shBand,latW,Rt,armParam,front,back,dMid,wrapF,wrapB,
+       wFore,wCalf,wShank,wBelly,wBellyLow,wPec,wGlute,legW,legOut,spreadT,footW,laW,laD,armAxW,armAxD,
        footCore:footCore.map(a=>Uint32Array.from(a)), footZone:footZone.map(a=>Uint32Array.from(a))};
 }
 
@@ -693,8 +753,9 @@ function applyMeshMorphs(quick){
   newHalf.fill(0);
 
   // hot loop: read the per-vertex arrays and slider values through locals
+  const bellySag=clamp01((P.belly-1)/0.6);
   const p_build=P.build, p_belly=P.belly, p_chestDepth=P.chestDepth, p_glutes=P.glutes, p_bodyDepth=P.bodyDepth, p_thighs=P.thighs, p_calves=P.calves, p_footSize=P.footSize, p_height=P.height;
-  const A_side=S.side, A_armW=S.armW, A_handW=S.handW, A_latW=S.latW, A_shBand=S.shBand, A_legW=S.legW, A_front=S.front, A_back=S.back, A_segK=S.segK, A_segA=S.segA, A_wBuild=S.wBuild, A_wTorsoD=S.wTorsoD, A_wBelly=S.wBelly, A_wPec=S.wPec, A_wGlute=S.wGlute, A_ax=S.ax, A_Rt=S.Rt, A_dMid=S.dMid, A_laW=S.laW, A_laD=S.laD, A_spreadT=S.spreadT, A_wCalf=S.wCalf, A_footW=S.footW, A_sliceOf=S.sliceOf;
+  const A_side=S.side, A_armW=S.armW, A_handW=S.handW, A_latW=S.latW, A_shBand=S.shBand, A_legW=S.legW, A_segK=S.segK, A_segA=S.segA, A_wBuild=S.wBuild, A_wTorsoD=S.wTorsoD, A_wBelly=S.wBelly, A_wBellyLow=S.wBellyLow, A_wrapF=S.wrapF, A_wrapB=S.wrapB, A_legOut=S.legOut, A_wPec=S.wPec, A_wGlute=S.wGlute, A_ax=S.ax, A_Rt=S.Rt, A_dMid=S.dMid, A_laW=S.laW, A_laD=S.laD, A_spreadT=S.spreadT, A_wCalf=S.wCalf, A_wShank=S.wShank, A_footW=S.footW, A_sliceOf=S.sliceOf;
   for(let i=0;i<n;i++){
     const o=i*3;
     const u=b[o+ui], x=b[o+wi], y=b[o+di];
@@ -713,7 +774,7 @@ function applyMeshMorphs(quick){
     U+=slopeLift*(A_latW[i]*A_shBand[i]*(1-aw)+aw);
     U=upMin+(U-upMin)*p_height;
 
-    const lw=A_legW[i], fr=A_front[i], bk=A_back[i];
+    const lw=A_legW[i];
     let xT=0, yT=0, xL=0, yL=0;
 
     /* ---- torso: smooth girth profile, rigid beyond the torso radius ---- */
@@ -722,10 +783,12 @@ function applyMeshMorphs(quick){
       const bw=1+(p_build-1)*A_wBuild[i];
       let gw=(gW[k]+(gW[k+1]-gW[k])*a)*bw;
       let gd=(gD[k]+(gD[k+1]-gD[k])*a)*bw*(1+(p_bodyDepth-1)*A_wTorsoD[i]);
-      gw*=1+(p_belly-1)*0.3*A_wBelly[i];
-      gd*=1+(p_belly-1)*A_wBelly[i]*fr
-           +(p_chestDepth-1)*A_wPec[i]*fr
-           +(p_glutes-1)*A_wGlute[i]*bk;
+      // the bulge hangs lower the further the slider is pushed, and wraps into the flanks
+      const wB=A_wBelly[i]+(A_wBellyLow[i]-A_wBelly[i])*bellySag;
+      gw*=1+(p_belly-1)*0.3*wB;
+      gd*=1+(p_belly-1)*wB*A_wrapF[i]
+           +(p_chestDepth-1)*A_wPec[i]*A_wrapF[i]
+           +(p_glutes-1)*A_wGlute[i]*A_wrapB[i];
       const r=A_ax[i], R=A_Rt[i];
       xT = r<=R ? wCen+(x-wCen)*gw : wCen+sgn*(R*gw+(r-R));
       xT+=sgn*shift*A_latW[i]*A_shBand[i];
@@ -737,15 +800,16 @@ function applyMeshMorphs(quick){
     if(lw>0){
       const la=A_laW[i], lad=A_laD[i];
       const spread=1+hipSpread*A_spreadT[i];
-      const wc=A_wCalf[i];
-      const legGirth=ltBase*(p_thighs+(p_calves-p_thighs)*wc);
-      const inner=(x-la)*(la-wCen)<0;
-      const legT=inner?1+(legGirth-1)*0.55:legGirth;             // thighs grow less inward
+      // thighs above the knee, and the calf added as a muscle that tapers into the ankle
+      // rather than as a uniform sleeve over the whole shin ending in a step at the foot
+      const wc=A_wCalf[i], wsh=A_wShank[i];
+      const legGirth=ltBase*(p_thighs+(1-p_thighs)*wc+(p_calves-1)*wsh);
+      const legT=1+(legGirth-1)*(0.55+0.45*A_legOut[i]);       // thighs grow less inward
       const fw=A_footW[i];
       const thick=legT+(p_footSize-legT)*fw;
       xL=wCen+(la-wCen)*spread+(x-la)*thick;
       // calves and glutes push out mostly at the back
-      const depthExtra=1+(p_calves-1)*0.6*wc*bk*(1-fw)+(p_glutes-1)*A_wGlute[i]*bk;
+      const depthExtra=1+(p_calves-1)*0.6*wsh*A_wrapB[i]*(1-fw)+(p_glutes-1)*A_wGlute[i]*A_wrapB[i];
       yL=lad+(y-lad)*thick*depthExtra;
     }
     const X= lw<=0 ? xT : lw>=1 ? xL : xT+(xL-xT)*lw;
@@ -760,11 +824,16 @@ function applyMeshMorphs(quick){
   /* ---- pass 2: arms, pushed out wherever the body grew into their space ---- */
   if(LM.hasArms){
     const SL=LM.SL;
+    // How far out the arm has to sit at each height to keep half of its original clearance
+    // from the body. Signed: where the body shrank, or narrow shoulders would draw the arm
+    // inwards, this is the furthest in it may come before it starts entering the ribs.
+    let carry=NaN;
     for(let s=0;s<SL;s++){
-      const growth=newHalf[s]-LM.bodyHalf[s];
-      const need=isFinite(LM.gapS[s]) ? growth-0.5*LM.gapS[s] : 0;
-      pushRaw[s]=Math.max(0,need);
+      pushRaw[s]=isFinite(LM.gapS[s]) ? (newHalf[s]-LM.bodyHalf[s])-0.5*LM.gapS[s] : NaN;
+      if(!isNaN(pushRaw[s])) carry=pushRaw[s]; else if(!isNaN(carry)) pushRaw[s]=carry;
     }
+    if(isNaN(carry)) pushRaw.fill(0);
+    else for(let s=SL-1;s>=0;s--){ if(isNaN(pushRaw[s])) pushRaw[s]=carry; else carry=pushRaw[s]; }
     for(let pass=0;pass<2;pass++){               // smooth so the arm bends gently
       for(let s=0;s<SL;s++){
         let a=0,c=0; for(let k=-3;k<=3;k++){ const j=s+k; if(j>=0&&j<SL){ a+=pushRaw[j]; c++; } }
@@ -772,19 +841,23 @@ function applyMeshMorphs(quick){
       }
       pushRaw.set(pushSm);
     }
-    const base=Math.max(armDisp,0);
     let handDisp=-Infinity;
     for(let s=0;s<SL;s++){
-      armDispS[s]=armDisp+Math.max(0,pushRaw[s]-base);
+      armDispS[s]=Math.max(armDisp,pushRaw[s]);
       if(s>=LM.handS0&&s<=LM.handS1&&armDispS[s]>handDisp) handDisp=armDispS[s];
     }
     if(!isFinite(handDisp)) handDisp=armDisp;
 
+    const A_t=S.t, SLm=SL-1;
     for(let i=0;i<n;i++){
       const aw=S.armW[i]; if(aw<=0) continue;
       const o=i*3, x=b[o+wi], y=b[o+di], hw=S.handW[i];
       const sd=S.side[i], sgn=sd?1:-1;
-      const disp=armDispS[S.sliceOf[i]];
+      // read the push-out at the vertex's own height: one value per slice would step the
+      // arm outwards in rings wherever the body has grown past it
+      const ps=A_t[i]*SL-0.5;
+      const s0=ps<0?0:ps>SLm?SLm:Math.floor(ps), s1=s0<SLm?s0+1:SLm, fa=clamp01(ps-s0);
+      const disp=armDispS[s0]+(armDispS[s1]-armDispS[s0])*fa;
       const AT=armBase*(P.upperArm+(P.forearm-P.upperArm)*S.wFore[i]);
       const pA=LM.pivotAx[sd], pD=LM.pivotAxD[sd];
       const aa=S.armAxW[i], aad=S.armAxD[i];
